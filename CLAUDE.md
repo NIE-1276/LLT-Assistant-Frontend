@@ -210,6 +210,24 @@ LLT-Assistant-VSCode/
 - **HTTP Client**: axios
 - **Target VSCode**: 1.85.0+
 
+## Development Guidelines
+
+### Code and Documentation Language
+
+**IMPORTANT**: All code comments, documentation, commit messages, and user-facing text MUST be written in English.
+
+This includes:
+- Code comments (inline and block)
+- JSDoc/TSDoc comments
+- README files
+- Documentation files
+- Commit messages
+- Error messages
+- UI text (notifications, tooltips, etc.)
+- Configuration descriptions
+
+**Exception**: User-facing UI text may be localized in the future, but the source should always be in English first.
+
 ## Development Phases
 
 ### Phase 1: Extension Setup & Infrastructure ✅
