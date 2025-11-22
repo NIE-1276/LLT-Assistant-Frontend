@@ -9,7 +9,7 @@ import * as fs from 'fs';
 import { CoverageXmlParser, findCoverageFile } from '../parser';
 import { CoverageTreeDataProvider } from '../activityBar';
 import { CoverageBackendClient } from '../api';
-import { UncoveredFunction, PartiallyCoveredFunction } from '../api/types';
+import { UncoveredFunction, PartiallyCoveredFunction, UncoveredRange, RecommendedTest } from '../api/types';
 import { CoverageConfig } from '../utils/config';
 
 export class CoverageCommands {
@@ -124,9 +124,22 @@ export class CoverageCommands {
 	}
 
 	/**
-	 * Generate test for a specific uncovered function
+	 * Generate test for a specific uncovered function or range
 	 */
-	async generateCoverageTest(filePath: string, func: UncoveredFunction): Promise<void> {
+	async generateCoverageTest(filePath: string, func: UncoveredFunction | { startLine: number; endLine: number; type?: string }): Promise<void> {
+		// Check file dirty state
+		const isDirty = await this.checkFileDirtyState(filePath);
+		if (isDirty) {
+			const action = await vscode.window.showWarningMessage(
+				'Source file has changed. Please run tests again to update coverage report.',
+				'Continue Anyway',
+				'Cancel'
+			);
+			if (action !== 'Continue Anyway') {
+				return;
+			}
+		}
+
 		// Check if backend is healthy
 		const isHealthy = await this.backendClient.healthCheck();
 		if (!isHealthy) {
@@ -136,38 +149,70 @@ export class CoverageCommands {
 			return;
 		}
 
+		const funcName = 'name' in func ? func.name : `lines_${func.startLine}_${func.endLine}`;
+
 		await vscode.window.withProgress(
 			{
 				location: vscode.ProgressLocation.Notification,
-				title: `Generating test for ${func.name}`,
+				title: `Generating test for ${funcName}`,
 				cancellable: false
 			},
 			async progress => {
 				try {
 					progress.report({ message: 'Reading source code...' });
 
-					// Read the function code
-					const sourceCode = await this.readFunctionCode(filePath, func.startLine, func.endLine);
+					// Read full source file code
+					const sourceCode = await this.readFullFileCode(filePath);
 
-					progress.report({ message: 'Calling LLM backend...' });
+					// Read existing test file code
+					const testFilePath = this.getTestFilePath(filePath);
+					const existingTestCode = await this.readExistingTestCode(testFilePath);
 
-					// Call backend to generate test
-					const response = await this.backendClient.generateCoverageTest({
-						filePath,
-						functionName: func.name,
-						functionCode: sourceCode,
-						context: {
-							imports: await this.extractImports(filePath)
-						}
+					progress.report({ message: 'Extracting uncovered ranges...' });
+
+					// Extract uncovered ranges from coverage.xml
+					const uncoveredRanges = await this.extractUncoveredRangesForFile(filePath, func);
+
+					if (uncoveredRanges.length === 0) {
+						vscode.window.showWarningMessage('No uncovered ranges found for this item.');
+						return;
+					}
+
+					progress.report({ message: 'Requesting coverage optimization...' });
+
+					// Call new optimization API
+					const taskResponse = await this.backendClient.requestCoverageOptimization({
+						source_code: sourceCode,
+						existing_test_code: existingTestCode,
+						uncovered_ranges: uncoveredRanges,
+						framework: 'pytest'
 					});
 
-					progress.report({ message: 'Inserting generated test...' });
+					progress.report({ message: 'Analyzing coverage gaps...', increment: 0 });
 
-					// Show generated test in inline preview
-					await this.showInlinePreview(filePath, response.generatedTests, func.name);
+					// Poll task status until completion
+					const finalStatus = await this.backendClient.pollTaskUntilComplete(
+						taskResponse.task_id,
+						(status) => {
+							progress.report({
+								message: `Analyzing coverage gaps... (${status.status})`,
+								increment: 0
+							});
+						}
+					);
+
+					if (!finalStatus.result || !finalStatus.result.recommended_tests) {
+						vscode.window.showWarningMessage('No recommended tests generated.');
+						return;
+					}
+
+					progress.report({ message: 'Preparing test preview...' });
+
+					// Show inline preview for recommended tests
+					await this.showRecommendedTestsPreview(testFilePath, finalStatus.result.recommended_tests);
 
 					vscode.window.showInformationMessage(
-						`Test generated for ${func.name}. Press Tab to accept or Esc to reject.`
+						`Generated ${finalStatus.result.recommended_tests.length} test(s). Press Tab to accept or Esc to reject.`
 					);
 				} catch (error: any) {
 					vscode.window.showErrorMessage(
@@ -211,16 +256,82 @@ export class CoverageCommands {
 	}
 
 	/**
-	 * Read function code from file
+	 * Check if source file has been modified (dirty state)
 	 */
-	private async readFunctionCode(
-		filePath: string,
-		startLine: number,
-		endLine: number
-	): Promise<string> {
+	private async checkFileDirtyState(filePath: string): Promise<boolean> {
+		const document = vscode.workspace.textDocuments.find(doc => doc.fileName === filePath);
+		if (document && document.isDirty) {
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Read full source file code
+	 */
+	private async readFullFileCode(filePath: string): Promise<string> {
 		const content = await fs.promises.readFile(filePath, 'utf-8');
-		const lines = content.split('\n');
-		return lines.slice(startLine - 1, endLine).join('\n');
+		return content;
+	}
+
+	/**
+	 * Read existing test file code, or return empty string if file doesn't exist
+	 */
+	private async readExistingTestCode(testFilePath: string): Promise<string> {
+		try {
+			const content = await fs.promises.readFile(testFilePath, 'utf-8');
+			return content;
+		} catch {
+			return '';
+		}
+	}
+
+	/**
+	 * Extract uncovered ranges for a specific file and function/range
+	 */
+	private async extractUncoveredRangesForFile(
+		filePath: string,
+		func: UncoveredFunction | { startLine: number; endLine: number; type?: string }
+	): Promise<UncoveredRange[]> {
+		const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+		if (!workspaceFolder) {
+			return [];
+		}
+
+		const workspaceRoot = workspaceFolder.uri.fsPath;
+		const coverageFilePath = await findCoverageFile(workspaceRoot);
+		if (!coverageFilePath) {
+			return [];
+		}
+
+		// Read and parse coverage.xml
+		const xmlContent = await fs.promises.readFile(coverageFilePath, 'utf-8');
+
+		// Find the class element for this file
+		const classRegex = new RegExp(
+			`<class[^>]*filename="${filePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[^>]*>([\\s\\S]*?)<\\/class>`,
+			'g'
+		);
+		const match = classRegex.exec(xmlContent);
+		if (!match) {
+			return [];
+		}
+
+		const classContent = match[1];
+		const allRanges = this.parser.extractUncoveredRanges(classContent);
+
+		// Filter ranges that overlap with the requested function/range
+		const startLine = func.startLine;
+		const endLine = func.endLine;
+		const relevantRanges = allRanges.filter(range => {
+			return (
+				(range.start_line >= startLine && range.start_line <= endLine) ||
+				(range.end_line >= startLine && range.end_line <= endLine) ||
+				(range.start_line <= startLine && range.end_line >= endLine)
+			);
+		});
+
+		return relevantRanges;
 	}
 
 	/**
@@ -238,34 +349,51 @@ export class CoverageCommands {
 	}
 
 	/**
-	 * Show inline preview for generated test
+	 * Show inline preview for recommended tests
 	 */
-	private async showInlinePreview(
-		filePath: string,
-		generatedTest: string,
-		functionName: string
+	private async showRecommendedTestsPreview(
+		testFilePath: string,
+		recommendedTests: RecommendedTest[]
 	): Promise<void> {
-		// Find the corresponding test file
-		const testFilePath = this.getTestFilePath(filePath);
+		// Import InlinePreviewManager
+		const { InlinePreviewManager } = await import('../preview');
 
-		// Open the test file
-		const document = await vscode.workspace.openTextDocument(testFilePath);
+		// Create or get preview manager instance
+		// Note: In a real implementation, this should be managed at the class level
+		const previewManager = new InlinePreviewManager();
+
+		// Open or create test file
+		let document: vscode.TextDocument;
+		try {
+			document = await vscode.workspace.openTextDocument(testFilePath);
+		} catch {
+			// File doesn't exist, create it
+			document = await vscode.workspace.openTextDocument({
+				language: 'python',
+				content: ''
+			});
+		}
+
 		const editor = await vscode.window.showTextDocument(document);
 
 		// Find insert position (end of file)
 		const lastLine = document.lineCount;
 		const position = new vscode.Position(lastLine, 0);
 
-		// Insert the generated test
-		await editor.edit(editBuilder => {
-			editBuilder.insert(position, '\n\n' + generatedTest);
-		});
+		// Combine all recommended tests
+		const combinedTestCode = recommendedTests
+			.map(test => test.test_code)
+			.join('\n\n');
 
-		// Move cursor to the inserted test
-		editor.selection = new vscode.Selection(position, position);
-		editor.revealRange(
-			new vscode.Range(position, position),
-			vscode.TextEditorRevealType.InCenter
+		// Show preview for the first test (or combined)
+		await previewManager.showPreview(
+			editor,
+			position,
+			combinedTestCode,
+			{
+				functionName: 'coverage_test',
+				explanation: recommendedTests.map(t => t.scenario_description).join('; ')
+			}
 		);
 	}
 
