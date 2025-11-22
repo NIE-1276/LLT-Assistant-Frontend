@@ -25,7 +25,7 @@ export class CoverageError extends Error implements CoverageBackendError {
 }
 
 const DEFAULTS = {
-	BACKEND_URL: 'https://cs5351.efan.dev/api/v1',
+	BACKEND_URL: 'https://cs5351.efan.dev',
 	TIMEOUT_MS: 60000, // 60 seconds for test generation (longer than quality analysis)
 	RETRY_MAX_ATTEMPTS: 3,
 	RETRY_BASE_DELAY_MS: 2000, // 2 seconds
@@ -54,9 +54,11 @@ export class CoverageBackendClient {
 	/**
 	 * Get backend URL from VSCode configuration
 	 */
-	private getBackendUrl(): string {
+	public getBackendUrl(): string {
 		const config = vscode.workspace.getConfiguration('llt-assistant');
-		return config.get('backendUrl', DEFAULTS.BACKEND_URL);
+		const backendUrl = config.get('backendUrl', DEFAULTS.BACKEND_URL);
+		console.log(`[LLT Coverage API] Reading backend URL from config: ${backendUrl} (default: ${DEFAULTS.BACKEND_URL})`);
+		return backendUrl;
 	}
 
 	/**
@@ -103,7 +105,7 @@ export class CoverageBackendClient {
 		for (let attempt = 0; attempt < maxRetries; attempt++) {
 			try {
 				const response = await this.client.post<TaskStatusResponse>(
-					'/optimization/coverage',
+					'/api/v1/optimization/coverage',
 					request
 				);
 
@@ -146,7 +148,7 @@ export class CoverageBackendClient {
 	 */
 	async pollTaskStatus(taskId: string): Promise<TaskStatusResponse> {
 		try {
-			const response = await this.client.get<TaskStatusResponse>(`/tasks/${taskId}`);
+			const response = await this.client.get<TaskStatusResponse>(`/api/v1/tasks/${taskId}`);
 			return response.data;
 		} catch (error) {
 			// Convert to CoverageBackendError for consistent error handling
@@ -219,10 +221,38 @@ export class CoverageBackendClient {
 	 * GET /health
 	 */
 	async healthCheck(): Promise<boolean> {
+		// Update backend URL from configuration before health check
+		this.updateBackendUrl();
+		
 		try {
+			const fullUrl = `${this.baseUrl}/health`;
+			console.log(`[LLT Coverage API] Health check: ${fullUrl}`);
 			const response = await this.client.get('/health');
+			console.log(`[LLT Coverage API] Health check success: ${response.status}`);
 			return response.status === 200;
 		} catch (error) {
+			const fullUrl = `${this.baseUrl}/health`;
+			if (axios.isAxiosError(error)) {
+				const axiosError = error as AxiosError;
+				if (!axiosError.response) {
+					console.error(`[LLT Coverage API] Health check failed (network error): ${fullUrl}`, axiosError.message);
+					if (axiosError.code) {
+						console.error(`[LLT Coverage API] Error code: ${axiosError.code}`);
+					}
+					if (axiosError.request) {
+						console.error(`[LLT Coverage API] Request config:`, {
+							url: axiosError.config?.url,
+							baseURL: axiosError.config?.baseURL,
+							method: axiosError.config?.method
+						});
+					}
+				} else {
+					console.error(`[LLT Coverage API] Health check failed (HTTP ${axiosError.response.status}): ${fullUrl}`);
+					console.error(`[LLT Coverage API] Response data:`, axiosError.response.data);
+				}
+			} else {
+				console.error(`[LLT Coverage API] Health check failed: ${fullUrl}`, error);
+			}
 			return false;
 		}
 	}
@@ -329,10 +359,13 @@ export class CoverageBackendClient {
 	 */
 	public updateBackendUrl(): void {
 		const newUrl = this.getBackendUrl();
+		console.log(`[LLT Coverage API] Updating backend URL: ${this.baseUrl} -> ${newUrl}`);
 		if (newUrl !== this.baseUrl) {
 			this.baseUrl = newUrl;
 			this.client.defaults.baseURL = newUrl;
 			console.log(`[LLT Coverage API] Backend URL updated to: ${newUrl}`);
+		} else {
+			console.log(`[LLT Coverage API] Backend URL unchanged: ${newUrl}`);
 		}
 	}
 

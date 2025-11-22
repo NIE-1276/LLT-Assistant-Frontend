@@ -1,27 +1,39 @@
 /**
  * Inline Preview for Generated Tests
- * Provides ghost text preview with Accept/Edit/Reject functionality
+ * Implements Speculative Insertion pattern: directly insert code with green decoration and CodeLens buttons
  */
 
 import * as vscode from 'vscode';
+import { ReviewCodeLensProvider, PendingEdit } from './reviewCodeLensProvider';
 
+/**
+ * Preview Manager using Speculative Insertion pattern
+ */
 export class InlinePreviewManager {
-	private currentPreview: InlinePreview | null = null;
+	private currentEdit: PendingEdit | null = null;
 	private decorationType: vscode.TextEditorDecorationType;
+	private codeLensProvider: ReviewCodeLensProvider;
+	private documentChangeListener?: vscode.Disposable;
 
-	constructor() {
-		// Create decoration type for ghost text
+	constructor(codeLensProvider: ReviewCodeLensProvider) {
+		// Create decoration type for green background (like Diff Add)
 		this.decorationType = vscode.window.createTextEditorDecorationType({
-			after: {
-				color: new vscode.ThemeColor('editorGhostText.foreground'),
-				fontStyle: 'italic'
-			},
-			isWholeLine: false
+			backgroundColor: 'rgba(40, 167, 69, 0.2)', // Green background
+			isWholeLine: true,
+			borderColor: 'rgba(40, 167, 69, 1)',
+			borderWidth: '0 0 0 2px', // Left green border
+			borderStyle: 'solid'
 		});
+
+		this.codeLensProvider = codeLensProvider;
 	}
 
 	/**
-	 * Show inline preview for generated test code
+	 * Show preview using Speculative Insertion pattern
+	 * 1. Insert code directly into editor
+	 * 2. Format the code
+	 * 3. Apply green decoration
+	 * 4. Show CodeLens buttons
 	 */
 	async showPreview(
 		editor: vscode.TextEditor,
@@ -37,83 +49,193 @@ export class InlinePreviewManager {
 		// Clear any existing preview
 		this.clearPreview();
 
-		// Create new preview
-		this.currentPreview = new InlinePreview(
-			editor,
-			position,
-			generatedCode,
-			this.decorationType,
-			metadata
-		);
+		// Step 1: Insert code directly into editor
+		const insertText = '\n\n' + generatedCode;
+		const success = await editor.edit(editBuilder => {
+			editBuilder.insert(position, insertText);
+		});
 
-		// Show the preview
-		await this.currentPreview.show();
+		if (!success) {
+			vscode.window.showErrorMessage('Failed to insert code');
+			return;
+		}
+
+		// Step 2: Calculate the inserted range
+		// We need to wait for the document to update, then get the actual range
+		const document = editor.document;
+		const startLine = position.line;
+		const endLine = startLine + generatedCode.split('\n').length + 1; // +1 for the extra newline
+
+		// Wait a bit for document to update
+		await new Promise(resolve => setTimeout(resolve, 50));
+
+		// Get the actual range after insertion
+		const startPos = new vscode.Position(startLine, 0);
+		let endPos: vscode.Position;
+		if (endLine < document.lineCount) {
+			endPos = new vscode.Position(endLine - 1, document.lineAt(endLine - 1).text.length);
+		} else {
+			endPos = new vscode.Position(document.lineCount - 1, document.lineAt(document.lineCount - 1).text.length);
+		}
+
+		let insertedRange = new vscode.Range(startPos, endPos);
+
+		// Step 3: Format the inserted code using VS Code native formatter
+		editor.selection = new vscode.Selection(insertedRange.start, insertedRange.end);
+		await vscode.commands.executeCommand('editor.action.formatSelection');
+
+		// Wait for formatting to complete
+		await new Promise(resolve => setTimeout(resolve, 200));
+
+		// Recalculate range after formatting (formatting may change line count)
+		const formattedEndLine = editor.selection.end.line;
+		if (formattedEndLine >= document.lineCount) {
+			endPos = new vscode.Position(document.lineCount - 1, document.lineAt(document.lineCount - 1).text.length);
+		} else {
+			endPos = new vscode.Position(formattedEndLine, document.lineAt(formattedEndLine).text.length);
+		}
+		insertedRange = new vscode.Range(startPos, endPos);
+
+		// Clear selection
+		editor.selection = new vscode.Selection(insertedRange.start, insertedRange.start);
+
+		// Step 4: Apply green decoration
+		editor.setDecorations(this.decorationType, [insertedRange]);
+
+		// Step 5: Set up CodeLens
+		const editId = Date.now().toString();
+		this.currentEdit = {
+			id: editId,
+			uri: document.uri,
+			range: insertedRange
+		};
+		this.codeLensProvider.setPendingEdit(this.currentEdit);
+
+		// Step 6: Monitor document changes - if user edits the green area, auto-accept
+		this.documentChangeListener = vscode.workspace.onDidChangeTextDocument((e) => {
+			if (e.document.uri.toString() !== document.uri.toString()) {
+				return;
+			}
+
+			if (!this.currentEdit) {
+				return;
+			}
+
+			// Check if any change overlaps with the inserted range
+			for (const change of e.contentChanges) {
+				const changeRange = change.range;
+				if (
+					changeRange.start.line <= this.currentEdit.range.end.line &&
+					changeRange.end.line >= this.currentEdit.range.start.line
+				) {
+					// User is editing the green area - auto-accept
+					this.acceptPreview();
+					break;
+				}
+			}
+		});
 
 		// Show information message
 		vscode.window.showInformationMessage(
-			'Test generated! Press Tab to accept, Ctrl+Enter to view diff, or Esc to reject.',
+			'Code inserted. Use CodeLens buttons to Accept or Discard.',
 			'Accept',
-			'View Diff',
-			'Reject'
+			'Discard'
 		).then(selection => {
 			if (selection === 'Accept') {
 				this.acceptPreview();
-			} else if (selection === 'View Diff') {
-				this.showDiff();
-			} else if (selection === 'Reject') {
+			} else if (selection === 'Discard') {
 				this.rejectPreview();
 			}
 		});
 	}
 
 	/**
-	 * Show diff view for current preview
-	 */
-	async showDiff(): Promise<void> {
-		if (this.currentPreview) {
-			await this.currentPreview.showDiff();
-		}
-	}
-
-	/**
-	 * Accept the current preview
+	 * Accept the preview - remove decoration and CodeLens, keep code
 	 */
 	async acceptPreview(): Promise<void> {
-		if (this.currentPreview) {
-			await this.currentPreview.accept();
-			this.currentPreview = null;
-			vscode.window.showInformationMessage('Test added successfully!');
+		if (!this.currentEdit) {
+			return;
 		}
+
+		const editor = vscode.window.visibleTextEditors.find(
+			e => e.document.uri.toString() === this.currentEdit!.uri.toString()
+		);
+
+		if (editor) {
+			// Remove decoration
+			editor.setDecorations(this.decorationType, []);
+		}
+
+		// Clear CodeLens
+		this.codeLensProvider.setPendingEdit(null);
+		this.currentEdit = null;
+
+		// Dispose document change listener
+		if (this.documentChangeListener) {
+			this.documentChangeListener.dispose();
+			this.documentChangeListener = undefined;
+		}
+
+		vscode.window.showInformationMessage('Code accepted');
 	}
 
 	/**
-	 * Edit the current preview
-	 */
-	async editPreview(): Promise<void> {
-		if (this.currentPreview) {
-			await this.currentPreview.edit();
-			this.currentPreview = null;
-		}
-	}
-
-	/**
-	 * Reject the current preview
+	 * Reject the preview - delete the inserted code
 	 */
 	async rejectPreview(): Promise<void> {
-		if (this.currentPreview) {
-			await this.currentPreview.reject();
-			this.currentPreview = null;
-			vscode.window.showInformationMessage('Test generation rejected');
+		if (!this.currentEdit) {
+			return;
 		}
+
+		const editor = vscode.window.visibleTextEditors.find(
+			e => e.document.uri.toString() === this.currentEdit!.uri.toString()
+		);
+
+		if (editor) {
+			// Delete the inserted code
+			const success = await editor.edit(editBuilder => {
+				editBuilder.delete(this.currentEdit!.range);
+			});
+
+			if (success) {
+				// Remove decoration
+				editor.setDecorations(this.decorationType, []);
+			}
+		}
+
+		// Clear CodeLens
+		this.codeLensProvider.setPendingEdit(null);
+		this.currentEdit = null;
+
+		// Dispose document change listener
+		if (this.documentChangeListener) {
+			this.documentChangeListener.dispose();
+			this.documentChangeListener = undefined;
+		}
+
+		vscode.window.showInformationMessage('Code discarded');
 	}
 
 	/**
-	 * Clear the current preview
+	 * Clear the preview
 	 */
 	clearPreview(): void {
-		if (this.currentPreview) {
-			this.currentPreview.clear();
-			this.currentPreview = null;
+		if (this.currentEdit) {
+			const editor = vscode.window.visibleTextEditors.find(
+				e => e.document.uri.toString() === this.currentEdit!.uri.toString()
+			);
+
+			if (editor) {
+				editor.setDecorations(this.decorationType, []);
+			}
+
+			this.codeLensProvider.setPendingEdit(null);
+			this.currentEdit = null;
+		}
+
+		if (this.documentChangeListener) {
+			this.documentChangeListener.dispose();
+			this.documentChangeListener = undefined;
 		}
 	}
 
@@ -123,235 +245,5 @@ export class InlinePreviewManager {
 	dispose(): void {
 		this.clearPreview();
 		this.decorationType.dispose();
-	}
-}
-
-/**
- * Individual inline preview instance
- */
-class InlinePreview {
-	private editor: vscode.TextEditor;
-	private position: vscode.Position;
-	private generatedCode: string;
-	private decorationType: vscode.TextEditorDecorationType;
-	private metadata?: {
-		functionName?: string;
-		explanation?: string;
-		scenarioDescription?: string;
-		expectedCoverageImpact?: string;
-	};
-	private disposables: vscode.Disposable[] = [];
-	private keyboardDisposable?: vscode.Disposable;
-
-	constructor(
-		editor: vscode.TextEditor,
-		position: vscode.Position,
-		generatedCode: string,
-		decorationType: vscode.TextEditorDecorationType,
-		metadata?: {
-			functionName?: string;
-			explanation?: string;
-			scenarioDescription?: string;
-			expectedCoverageImpact?: string;
-		}
-	) {
-		this.editor = editor;
-		this.position = position;
-		this.generatedCode = generatedCode;
-		this.decorationType = decorationType;
-		this.metadata = metadata;
-	}
-
-	/**
-	 * Show the preview
-	 */
-	async show(): Promise<void> {
-		// Show as ghost text decoration
-		const lines = this.generatedCode.split('\n');
-		const decorations: vscode.DecorationOptions[] = [];
-
-		lines.forEach((line, index) => {
-			const linePosition = new vscode.Position(
-				this.position.line + index,
-				index === 0 ? this.position.character : 0
-			);
-			const range = new vscode.Range(linePosition, linePosition);
-
-			// Create tooltip with metadata
-			const tooltip = this.createTooltip();
-
-			decorations.push({
-				range,
-				renderOptions: {
-					after: {
-						contentText: line,
-						color: new vscode.ThemeColor('editorGhostText.foreground'),
-						fontStyle: 'italic'
-					}
-				},
-				hoverMessage: tooltip
-			});
-		});
-
-		this.editor.setDecorations(this.decorationType, decorations);
-
-		// Register keyboard shortcuts
-		this.registerKeyboardShortcuts();
-
-		// Register commands for this preview
-		this.registerCommands();
-	}
-
-	/**
-	 * Create tooltip with metadata information
-	 */
-	private createTooltip(): vscode.MarkdownString {
-		const tooltip = new vscode.MarkdownString();
-		tooltip.appendMarkdown('**Generated Test Code**\n\n');
-
-		if (this.metadata?.scenarioDescription) {
-			tooltip.appendMarkdown(`**Scenario:** ${this.metadata.scenarioDescription}\n\n`);
-		}
-
-		if (this.metadata?.expectedCoverageImpact) {
-			tooltip.appendMarkdown(`**Coverage Impact:** ${this.metadata.expectedCoverageImpact}\n\n`);
-		}
-
-		if (this.metadata?.explanation) {
-			tooltip.appendMarkdown(`**Explanation:** ${this.metadata.explanation}\n\n`);
-		}
-
-		tooltip.appendMarkdown('---\n\n');
-		tooltip.appendMarkdown('Press **Tab** to accept, **Ctrl+Enter** to view diff, or **Esc** to reject.');
-
-		return tooltip;
-	}
-
-	/**
-	 * Register keyboard shortcuts for Tab, Esc, and Ctrl+Enter
-	 */
-	private registerKeyboardShortcuts(): void {
-		// Listen for keyboard events in the editor
-		const disposable = vscode.commands.registerCommand('type', async (args) => {
-			// This is a workaround - VSCode doesn't provide direct keyboard event listeners
-			// We'll rely on the command-based approach instead
-		});
-
-		// Register specific keybindings through commands
-		// Note: These need to be registered in package.json keybindings section
-		// For now, we'll handle them through the command registration
-		this.keyboardDisposable = disposable;
-		this.disposables.push(disposable);
-	}
-
-	/**
-	 * Accept the preview and insert code
-	 */
-	async accept(): Promise<void> {
-		await this.editor.edit(editBuilder => {
-			// Insert the generated code
-			editBuilder.insert(this.position, '\n\n' + this.generatedCode);
-		});
-
-		// Format the document
-		await vscode.commands.executeCommand('editor.action.formatDocument');
-
-		this.clear();
-	}
-
-	/**
-	 * Show diff view comparing current file with generated code
-	 */
-	async showDiff(): Promise<void> {
-		const currentContent = this.editor.document.getText();
-		const newContent = currentContent + '\n\n' + this.generatedCode;
-
-		// Create temporary URI for the new content
-		const tempUri = vscode.Uri.parse(
-			`${this.editor.document.uri.toString()}.generated`
-		);
-
-		// Write generated content to temp file
-		const tempDoc = await vscode.workspace.openTextDocument(tempUri);
-		await vscode.window.showTextDocument(tempDoc, {
-			viewColumn: vscode.ViewColumn.Beside,
-			preview: false
-		});
-
-		await vscode.window.activeTextEditor?.edit(editBuilder => {
-			editBuilder.insert(new vscode.Position(0, 0), newContent);
-		});
-
-		// Open diff view
-		await vscode.commands.executeCommand(
-			'vscode.diff',
-			this.editor.document.uri,
-			tempUri,
-			'Current ↔ Generated Test'
-		);
-
-		// Don't clear preview - user might want to accept after viewing diff
-	}
-
-	/**
-	 * Edit the preview - open in diff editor (legacy method, redirects to showDiff)
-	 */
-	async edit(): Promise<void> {
-		await this.showDiff();
-	}
-
-	/**
-	 * Reject the preview
-	 */
-	async reject(): Promise<void> {
-		this.clear();
-	}
-
-	/**
-	 * Clear the preview
-	 */
-	clear(): void {
-		// Clear decorations
-		this.editor.setDecorations(this.decorationType, []);
-
-		// Dispose all disposables
-		this.disposables.forEach(d => d.dispose());
-		this.disposables = [];
-
-		if (this.keyboardDisposable) {
-			this.keyboardDisposable.dispose();
-			this.keyboardDisposable = undefined;
-		}
-	}
-
-	/**
-	 * Register commands for this preview
-	 */
-	private registerCommands(): void {
-		// Register keyboard shortcuts
-		const acceptCommand = vscode.commands.registerCommand(
-			'llt-assistant.acceptInlinePreview',
-			() => this.accept()
-		);
-
-		const rejectCommand = vscode.commands.registerCommand(
-			'llt-assistant.rejectInlinePreview',
-			() => this.reject()
-		);
-
-		const editCommand = vscode.commands.registerCommand(
-			'llt-assistant.editInlinePreview',
-			() => this.edit()
-		);
-
-		this.disposables.push(acceptCommand, rejectCommand, editCommand);
-	}
-
-	/**
-	 * Show hover message with preview info
-	 */
-	private showHoverMessage(): void {
-		// This would ideally use a CodeLens or Hover provider
-		// For simplicity, we're showing an information message
 	}
 }
