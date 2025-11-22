@@ -37,7 +37,7 @@ export class ImpactAnalysisClient {
 	private getBackendUrl(): string {
 		const config = vscode.workspace.getConfiguration('llt-assistant');
 		// Use the same backend URL as test generation
-		return config.get('backendUrl', 'https://llt-assistant.fly.dev/api/v1');
+		return config.get('backendUrl', 'https://cs5351.efan.dev');
 	}
 
 	/**
@@ -91,7 +91,7 @@ export class ImpactAnalysisClient {
 
 			// Make API call
 			const response = await this.axiosInstance.post<DetectCodeChangesResponse>(
-				'/workflows/detect-code-changes',
+				'/api/v1/workflows/detect-code-changes',
 				request
 			);
 
