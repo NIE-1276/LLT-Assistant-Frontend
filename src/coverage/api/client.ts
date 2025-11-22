@@ -5,14 +5,19 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import * as vscode from 'vscode';
 import {
-	CoverageBackendError
+	CoverageBackendError,
+	CoverageOptimizationRequest,
+	TaskStatusResponse
 } from './types';
 
 const DEFAULTS = {
-	BACKEND_URL: 'https://llt-assistant.fly.dev/api/v1',
+	BACKEND_URL: 'https://cs5351.efan.dev/api/v1',
 	TIMEOUT_MS: 60000, // 60 seconds for test generation (longer than quality analysis)
 	RETRY_MAX_ATTEMPTS: 3,
-	RETRY_BASE_DELAY_MS: 2000 // 2 seconds
+	RETRY_BASE_DELAY_MS: 2000, // 2 seconds
+	POLL_INTERVAL_MS: 1000, // 1 second initial poll interval
+	MAX_POLL_INTERVAL_MS: 5000, // 5 seconds max poll interval
+	MAX_POLL_TIMEOUT_MS: 300000 // 5 minutes max wait time
 };
 
 export class CoverageBackendClient {
@@ -67,6 +72,131 @@ export class CoverageBackendClient {
 				return Promise.reject(this.handleApiError(error));
 			}
 		);
+	}
+
+	/**
+	 * Request coverage optimization
+	 *
+	 * POST /optimization/coverage
+	 * Returns 202 Accepted with task_id for async processing
+	 */
+	async requestCoverageOptimization(
+		request: CoverageOptimizationRequest
+	): Promise<TaskStatusResponse> {
+		const maxRetries = DEFAULTS.RETRY_MAX_ATTEMPTS;
+		let lastError: any;
+
+		for (let attempt = 0; attempt < maxRetries; attempt++) {
+			try {
+				const response = await this.client.post<TaskStatusResponse>(
+					'/optimization/coverage',
+					request
+				);
+
+				// Expect 202 Accepted for async task
+				if (response.status === 202 || response.status === 200) {
+					return response.data;
+				}
+
+				throw new Error(`Unexpected status code: ${response.status}`);
+			} catch (error) {
+				lastError = error;
+
+				// Check if error is retryable
+				if (!this.isRetryableError(error)) {
+					throw error;
+				}
+
+				// Don't retry on last attempt
+				if (attempt === maxRetries - 1) {
+					break;
+				}
+
+				// Exponential backoff: 2s, 4s, 8s
+				const delayMs = Math.pow(2, attempt) * DEFAULTS.RETRY_BASE_DELAY_MS;
+				console.log(
+					`[LLT Coverage API] Retry attempt ${attempt + 1}/${maxRetries} after ${delayMs}ms`
+				);
+				await this.delay(delayMs);
+			}
+		}
+
+		throw lastError;
+	}
+
+	/**
+	 * Poll task status
+	 *
+	 * GET /tasks/{task_id}
+	 * Returns current status of async task
+	 */
+	async pollTaskStatus(taskId: string): Promise<TaskStatusResponse> {
+		try {
+			const response = await this.client.get<TaskStatusResponse>(`/tasks/${taskId}`);
+			return response.data;
+		} catch (error) {
+			// Convert to CoverageBackendError for consistent error handling
+			const backendError = this.handleApiError(error);
+			throw backendError;
+		}
+	}
+
+	/**
+	 * Poll task status until completion with exponential backoff
+	 *
+	 * @param taskId - Task ID to poll
+	 * @param onProgress - Optional callback for progress updates
+	 * @returns Final task status response
+	 */
+	async pollTaskUntilComplete(
+		taskId: string,
+		onProgress?: (status: TaskStatusResponse) => void
+	): Promise<TaskStatusResponse> {
+		const startTime = Date.now();
+		let pollInterval = DEFAULTS.POLL_INTERVAL_MS;
+
+		while (true) {
+			// Check timeout
+			const elapsed = Date.now() - startTime;
+			if (elapsed > DEFAULTS.MAX_POLL_TIMEOUT_MS) {
+				throw {
+					type: 'timeout',
+					message: 'Task polling timeout',
+					detail: `Task ${taskId} did not complete within ${DEFAULTS.MAX_POLL_TIMEOUT_MS}ms`,
+					statusCode: 0
+				} as CoverageBackendError;
+			}
+
+			// Poll status
+			const status = await this.pollTaskStatus(taskId);
+
+			// Call progress callback if provided
+			if (onProgress) {
+				onProgress(status);
+			}
+
+			// Check if task is complete
+			if (status.status === 'completed') {
+				return status;
+			}
+
+			// Check if task failed
+			if (status.status === 'failed') {
+				throw {
+					type: 'server',
+					message: 'Task failed',
+					detail: `Task ${taskId} failed during processing`,
+					statusCode: 0
+				} as CoverageBackendError;
+			}
+
+			// Wait before next poll with exponential backoff
+			await this.delay(pollInterval);
+			pollInterval = Math.min(
+				pollInterval * 1.5,
+				DEFAULTS.MAX_POLL_INTERVAL_MS
+			);
+		}
 	}
 
 	/**
