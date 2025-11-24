@@ -4,7 +4,7 @@
  */
 
 import * as vscode from 'vscode';
-import { MaintenanceResult, AffectedTestCase, UserDecision, UserDecisionType } from '../models/types';
+import { MaintenanceResult, AffectedTestCase, UserDecision } from '../models/types';
 
 /**
  * Decision Dialog Manager
@@ -96,10 +96,6 @@ export class DecisionDialogManager {
 	private async promptForFunctionalityDescription(
 		result: MaintenanceResult
 	): Promise<string | undefined> {
-		const functionsList = result.change_summary.functions_changed
-			.map((f: string) => `  • ${f}`)
-			.join('\n');
-
 		const description = await vscode.window.showInputBox({
 			prompt: 'Describe the new/changed functionality',
 			placeHolder: 'e.g., Added support for negative numbers, Changed return type to include error codes, etc.',
@@ -159,9 +155,7 @@ export class DecisionDialogManager {
 
 		if (action === 'Preview') {
 			// Show diff using built-in diff viewer
-			const oldUri = vscode.Uri.parse(`llt-preview:${filePath}?old=true&${Date.now()}`);
-			const newUri = vscode.Uri.parse(`llt-preview:${filePath}?new=true&${Date.now()}`);
-
+			// TODO: Implement content provider for diff preview
 			// This would require a content provider - simplified for now
 			await vscode.window.showInformationMessage('Diff preview would be shown here');
 			return true;

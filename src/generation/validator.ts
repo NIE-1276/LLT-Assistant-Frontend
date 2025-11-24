@@ -18,7 +18,6 @@ const execAsync = promisify(exec);
 
 // Optional tree-sitter imports (may fail if native module not available)
 let Parser: any;
-let SyntaxNode: any;
 let pythonLanguage: any;
 let pythonParser: any;
 
@@ -26,12 +25,10 @@ try {
   const treeSitter = require('tree-sitter');
   const Python = require('tree-sitter-python');
   Parser = treeSitter.default || treeSitter;
-  SyntaxNode = treeSitter.SyntaxNode;
   pythonLanguage = Python.default || Python;
 } catch (error) {
   console.warn('[Validator] tree-sitter not available, syntax validation will be skipped:', error);
   Parser = null;
-  SyntaxNode = null;
   pythonLanguage = null;
 }
 

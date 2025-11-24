@@ -164,7 +164,7 @@ export class AnalyzeMaintenanceCommand {
 					}
 
 					if (!previousCommitHash) {
-						const action = await vscode.window.showInformationMessage(
+						await vscode.window.showInformationMessage(
 							'This appears to be the first commit. Maintenance analysis requires at least 2 commits to compare changes.\n\nPlease make another commit to use this feature.',
 							'OK'
 						);

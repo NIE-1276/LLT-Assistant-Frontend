@@ -39,7 +39,6 @@ import {
 } from './impact';
 import {
 	MaintenanceBackendClient,
-	GitCommitWatcher,
 	GitDiffAnalyzer,
 	MaintenanceTreeProvider,
 	AnalyzeMaintenanceCommand,

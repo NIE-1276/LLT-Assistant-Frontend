@@ -6,10 +6,8 @@
 import * as vscode from 'vscode';
 import { MaintenanceBackendClient } from '../api/maintenanceClient';
 import { MaintenanceTreeProvider } from '../ui/maintenanceTreeProvider';
-import { MaintenanceResult, AffectedTestCase, BatchFixResult, UserDecisionType } from '../models/types';
+import { MaintenanceResult, AffectedTestCase, UserDecisionType } from '../models/types';
 import { BatchFixRequest } from '../api/types';
-import { ConfigurationManager, BackendApiClient } from '../../api';
-import { pollTask } from '../../generation/async-task-poller';
 import { CodeAnalyzer } from '../../utils';
 import * as path from 'path';
 
