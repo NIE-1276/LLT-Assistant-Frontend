@@ -52,7 +52,10 @@ export class AnalyzeImpactCommand {
 						// Step 2: Extract git diff
 						progress.report({ message: 'Extracting code changes from git...', increment: 20 });
 						const diffExtractor = new GitDiffExtractor(workspaceRoot);
+							console.log("[Impact Analysis] Extracting changes from workspace:", workspaceRoot);
 						const changes = await diffExtractor.getWorkingDirChanges();
+							console.log("[Impact Analysis] Found changes in", changes.size, "files");
+							console.log("[Impact Analysis] Changed files:", Array.from(changes.keys()));
 
 						if (changes.size === 0) {
 							vscode.window.showInformationMessage(
