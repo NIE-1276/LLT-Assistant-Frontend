@@ -169,9 +169,31 @@ export class ApiClient {
     
     try {
       const response = await this.get('/health');
-      return response.status === 'ok';
+      // Handle both "ok" and "healthy" responses
+      console.log(`[LLT API] Health check response: ${JSON.stringify(response)}`);
+      const isHealthy = response.status === 'ok' || response.status === 'healthy';
+      console.log(`[LLT API] Health check result: ${isHealthy}`);
+      return isHealthy;
     } catch (error) {
       return false;
+    }
+  }
+
+  /**
+   * Check project status on the backend
+   */
+  async getProjectStatus(projectId: string): Promise<{ status: 'ok' | 'not_found' }> {
+    console.log(`[LLT API] GET /context/projects/${projectId}/status`);
+    try {
+      // We expect this to either succeed (200 OK) or fail (404 Not Found)
+      const response = await this.get(`/context/projects/${projectId}/status`);
+      return { status: 'ok' };
+    } catch (error: any) {
+      if (error instanceof HttpError && error.status === 404) {
+        return { status: 'not_found' };
+      }
+      // For other errors (like connection refused), re-throw
+      throw this.normalizeError(error);
     }
   }
 

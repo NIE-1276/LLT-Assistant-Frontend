@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { ApiClient } from './ApiClient';
 
 /**
  * Cached symbol information for a single file
@@ -63,7 +64,10 @@ export class ContextState {
   private readonly CACHE_KEY = 'llt.projectCache';
   private cache: ProjectCache | null = null;
 
-  constructor(private context: vscode.ExtensionContext) {}
+  constructor(
+    private context: vscode.ExtensionContext,
+    private apiClient: ApiClient
+  ) {}
 
   /**
    * Load cache from VSCode workspace state
@@ -150,9 +154,9 @@ export class ContextState {
   }
 
   /**
-   * Check if cache is valid and can be used
+   * Check if cache is valid and can be used. Now includes a check against the backend.
    */
-  isValid(): boolean {
+  async isValid(): Promise<boolean> {
     if (!this.cache) {
       console.log('[LLT ContextState] Cache invalid: empty cache');
       return false;
@@ -164,18 +168,30 @@ export class ContextState {
       return false;
     }
 
-    // Check 2: Workspace path (handle case when no workspace is open)
+    // Check 2: Workspace path
     const currentWorkspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    if (currentWorkspacePath && this.cache.workspacePath !== currentWorkspacePath) {
+    if (!currentWorkspacePath || this.cache.workspacePath !== currentWorkspacePath) {
       console.log('[LLT ContextState] Cache invalid: workspace path changed');
       return false;
     }
 
-    // Check 3: Age (optional, can be disabled)
+    // Check 3: Age
     const age = Date.now() - this.cache.lastIndexedAt.getTime();
     if (age > MAX_CACHE_AGE) {
-      console.log('[LLT ContextState] Cache invalid: too old (>30 days)');
+      console.log(`[LLT ContextState] Cache invalid: too old (${Math.round(age / (1000 * 3600 * 24))} days)`);
       return false;
+    }
+
+    // Check 4: Backend project existence (optional, network request)
+    try {
+      const backendStatus = await this.apiClient.getProjectStatus(this.cache.projectId);
+      if (backendStatus.status === 'not_found') {
+        console.log('[LLT ContextState] Cache invalid: backend project not found');
+        return false;
+      }
+    } catch (error) {
+      // If backend is down, we can't validate. Treat as temporarily valid to allow offline work.
+      console.warn('[LLT ContextState] Could not verify project with backend, assuming valid for now.', error);
     }
 
     console.log('[LLT ContextState] Cache is valid');
@@ -201,13 +217,14 @@ export class ContextState {
     const oldSymbols = this.cache.fileSymbols.get(filePath);
     if (oldSymbols) {
       this.cache.statistics.totalSymbols -= oldSymbols.length;
-      this.cache.statistics.totalFiles -= 1;
+    } else {
+      // This is a new file
+      this.cache.statistics.totalFiles += 1;
     }
 
     // Set new symbols
     this.cache.fileSymbols.set(filePath, symbols);
     this.cache.statistics.totalSymbols += symbols.length;
-    this.cache.statistics.totalFiles += 1;
   }
 
   /**
@@ -261,7 +278,7 @@ export class ContextState {
   }
 
   /**
-   * Set project ID
+   * Set project ID and initialize cache if it doesn't exist.
    */
   setProjectId(projectId: string): void {
     const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
@@ -279,8 +296,8 @@ export class ContextState {
     } else {
       this.cache.projectId = projectId;
       this.cache.workspacePath = workspacePath;
-      this.cache.lastIndexedAt = new Date();
     }
+    this.updateLastIndexedAt();
   }
 
   /**
@@ -317,10 +334,8 @@ export class ContextState {
     }
 
     console.log(`[LLT ContextState] Migrating cache from v${data.version} to v${CURRENT_SCHEMA_VERSION}`);
-    
-    // In Phase 1, we only have version 1, so no migrations needed yet
-    // This is a placeholder for future phases
-    
+    // In a real scenario, you'd have migration logic here.
+    // For now, we just update the version.
     const migrated = {
       ...data,
       version: CURRENT_SCHEMA_VERSION,
@@ -329,7 +344,7 @@ export class ContextState {
       statistics: data.statistics || { totalFiles: 0, totalSymbols: 0 }
     } as SerializedCache;
 
-    // Save migrated cache immediately
+    // Save migrated cache immediately to avoid re-migration
     await this.context.workspaceState.update(this.CACHE_KEY, migrated);
     console.log('[LLT ContextState] Migration complete');
     
@@ -337,26 +352,17 @@ export class ContextState {
   }
 
   /**
-   * Recalculate statistics from file symbols
+   * Recalculate statistics from file symbols map
    */
-  async recalculateStatistics(): Promise<void> {
+  recalculateStatistics(): void {
     if (!this.cache) {
       return;
     }
 
-    let totalFiles = 0;
-    let totalSymbols = 0;
+    this.cache.statistics.totalFiles = this.cache.fileSymbols.size;
+    this.cache.statistics.totalSymbols = Array.from(this.cache.fileSymbols.values())
+      .reduce((acc, symbols) => acc + symbols.length, 0);
 
-    for (const symbols of this.cache.fileSymbols.values()) {
-      totalFiles += 1;
-      totalSymbols += symbols.length;
-    }
-
-    this.cache.statistics = {
-      totalFiles,
-      totalSymbols
-    };
-
-    console.log(`[LLT ContextState] Statistics recalculated: ${totalFiles} files, ${totalSymbols} symbols`);
+    console.log(`[LLT ContextState] Statistics recalculated: ${this.cache.statistics.totalFiles} files, ${this.cache.statistics.totalSymbols} symbols`);
   }
 }

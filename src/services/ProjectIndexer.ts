@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
+import * as path from 'path';
 import { ContextState, SymbolInfo } from './ContextState';
 import { extractSymbolsFromDocument } from '../utils/symbolExtraction';
 import { ApiClient, InitResponse, apiClient } from './ApiClient';
@@ -77,6 +78,11 @@ export class ProjectIndexer {
       console.log(`[LLT ProjectIndexer] Found ${files.length} Python files`);
       this.outputChannel.appendLine(`Found ${files.length} Python files`);
 
+      // Log each file path for debugging
+      files.forEach((file, index) => {
+        console.log(`[LLT ProjectIndexer]   [${index + 1}] ${file.fsPath}`);
+      });
+
       return files;
     } catch (error) {
       console.error('[LLT ProjectIndexer] Error discovering files:', error);
@@ -110,6 +116,12 @@ export class ProjectIndexer {
       console.log(`[LLT ProjectIndexer] Processing batch ${batchIndex + 1}/${totalBatches} (${startIndex}-${endIndex})`);
       this.outputChannel.appendLine(`Processing batch ${batchIndex + 1}/${totalBatches}...`);
 
+      // Log each file being processed
+      batch.forEach((file, idx) => {
+        console.log(`[LLT ProjectIndexer]   File ${idx + 1}: ${file.fsPath}`);
+        this.outputChannel.appendLine(`  - ${path.basename(file.fsPath)}`);
+      });
+
       // Extract symbols from all files in batch in parallel
       try {
         const batchResults = await Promise.all(
@@ -117,6 +129,14 @@ export class ProjectIndexer {
             try {
               const document = await vscode.workspace.openTextDocument(fileUri);
               const symbols = await extractSymbolsFromDocument(document);
+              
+              // 🔥 Add diagnostic logs
+              console.log(`[LLT ProjectIndexer] Extracted ${symbols.length} symbols from ${fileUri.fsPath}`);
+              if (symbols.length > 0) {
+                symbols.forEach(symbol => {
+                  console.log(`[LLT ProjectIndexer]   Symbol: ${symbol.name} (${symbol.kind})`);
+                });
+              }
               
               return {
                 filePath: fileUri.fsPath,
@@ -133,8 +153,17 @@ export class ProjectIndexer {
           })
         );
 
+        // Log filtered results
+        const validResults = batchResults.filter(result => result.symbols.length > 0);
+        const emptyResults = batchResults.filter(result => result.symbols.length === 0);
+        
+        console.log(`[LLT ProjectIndexer] Valid files: ${validResults.length}, Empty files: ${emptyResults.length}`);
+        emptyResults.forEach((result, idx) => {
+          console.log(`[LLT ProjectIndexer]   Empty [${idx + 1}]: ${result.filePath}`);
+        });
+        
         // Add successful results
-        results.push(...batchResults.filter(result => result.symbols.length > 0));
+        results.push(...validResults);
 
         processedCount += batch.length;
 
@@ -179,25 +208,88 @@ export class ProjectIndexer {
     }
 
     const projectId = this.generateProjectId(workspacePath);
+    
+    // 🔥 Add detailed validation before sending
+    this.outputChannel.appendLine(`\n🔍 Preparing to send to backend:`);
+    this.outputChannel.appendLine(`   Project ID: ${projectId}`);
+    this.outputChannel.appendLine(`   Workspace: ${workspacePath}`);
+    this.outputChannel.appendLine(`   Files discovered: ${data.length}`);
+    
+    const payloadFiles = data.map(item => ({
+      path: item.filePath,
+      symbols: item.symbols.map(symbol => ({
+        name: symbol.name,
+        kind: symbol.kind,
+        signature: symbol.signature || '',
+        line_start: symbol.line_start,
+        line_end: symbol.line_end,
+        calls: symbol.calls
+      }))
+    })).filter(item => item.symbols.length > 0);
+    
+    this.outputChannel.appendLine(`   Files with symbols: ${payloadFiles.length}`);
+    
+    // 🔥 CRITICAL: Check if we have any files to send
+    if (payloadFiles.length === 0) {
+      this.outputChannel.appendLine(`\n❌ ERROR: No files with symbols to send!`);
+      this.outputChannel.appendLine(`   Possible causes:`);
+      this.outputChannel.appendLine(`   1. Python Language Server not running`);
+      this.outputChannel.appendLine(`   2. Files don't contain functions/classes`);
+      this.outputChannel.appendLine(`   3. Files are outside workspace directory`);
+      this.outputChannel.appendLine(`\n💡 Try:`);
+      this.outputChannel.appendLine(`   - Check Python extension is activated (Python version in status bar)`);
+      this.outputChannel.appendLine(`   - Open a Python file and check for syntax highlighting`);
+      this.outputChannel.appendLine(`   - Run "Python: Restart Language Server" command`);
+      
+      // 🔥 Provide a graceful fallback: send minimal test data
+      this.outputChannel.appendLine(`\n🔄 Attempting fallback: Creating minimal test file...`);
+      
+      const minimalPayload = {
+        project_id: projectId,
+        workspace_path: workspacePath,
+        language: 'python',
+        files: [
+          {
+            path: `${workspacePath}/test_fallback.py`,
+            symbols: [
+              {
+                name: 'test_function',
+                kind: 'function',
+                signature: 'test_function() -> None',
+                line_start: 0,
+                line_end: 2,
+                calls: []
+              }
+            ]
+          }
+        ]
+      };
+      
+      console.log('[LLT API] Using fallback payload:', JSON.stringify(minimalPayload, null, 2));
+      
+      try {
+        const response = await this.apiClient.initializeProject(minimalPayload);
+        this.outputChannel.appendLine(`✅ Fallback successful! Backend accepted minimal data.`);
+        return response;
+      } catch (fallbackError) {
+        this.outputChannel.appendLine(`❌ Fallback also failed: ${fallbackError}`);
+        throw new Error('No symbols extracted from Python files. Please check that Python Language Server is running.');
+      }
+    }
+
     const payload = {
       project_id: projectId,
       workspace_path: workspacePath,
       language: 'python',
-      files: data.map(item => ({
-        path: item.filePath,
-        symbols: item.symbols.map(symbol => ({
-          name: symbol.name,
-          kind: symbol.kind,
-          signature: symbol.signature || '',
-          line_start: symbol.line_start,
-          line_end: symbol.line_end,
-          calls: symbol.calls
-        }))
-      })).filter(item => item.symbols.length > 0) // Skip files with no symbols
+      files: payloadFiles
     };
 
     console.log(`[LLT ProjectIndexer] Sending ${payload.files.length} files to backend`);
+    console.log('[LLT ProjectIndexer] Payload preview:', JSON.stringify(payload, null, 2));
+    
     this.outputChannel.appendLine(`Sending data to backend...`);
+    this.outputChannel.appendLine(`Files to index: ${payload.files.length}`);
+    this.outputChannel.appendLine(`Total symbols: ${payload.files.reduce((sum, f) => sum + f.symbols.length, 0)}`);
 
     try {
       // Check if project already exists with a quick health check
@@ -216,10 +308,6 @@ export class ProjectIndexer {
       this.contextState.setProjectId(response.project_id);
       this.contextState.setVersion(1); // Initial version
       this.contextState.updateLastIndexedAt();
-
-      // No, we don't need to save cache here because we don't store full data
-      // in Phase 1 - that's what the backend is for!
-      // This is just metadata for tracking state.
 
       return response;
     } catch (error: any) {

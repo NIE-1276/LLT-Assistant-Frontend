@@ -48,11 +48,12 @@ import {
 import { extractSymbolsCommand } from './debug/commands/extractSymbols';
 import { runDiagnostic } from './debug/diagnostic';
 
-// ===== Phase 1 Context System Imports =====
+import { apiClient } from './services/ApiClient';
 import { ContextState } from './services/ContextState';
 import { ProjectIndexer } from './services/ProjectIndexer';
 import { IncrementalUpdater } from './services/IncrementalUpdater';
 import { ContextStatusView } from './views/ContextStatusView';
+import { waitForLSP, sleep } from './utils/lspWaiter';
 
 // ===== Global Service References =====
 let contextState: ContextState | undefined;
@@ -71,39 +72,34 @@ export async function activate(context: vscode.ExtensionContext) {
 	// ===== Phase 1 Context System Initialization =====
 	console.log('[LLT] Initializing Phase 1 Context System...');
 	
-	// 1. Create output channel for logging
 	const outputChannel = vscode.window.createOutputChannel('LLT Assistant');
 	context.subscriptions.push(outputChannel);
-	outputChannel.appendLine('LLT Assistant Phase 1 Context System initializing...');
+	outputChannel.appendLine('LLT Assistant initializing...');
 
-	// 2. Initialize state management
-	contextState = new ContextState(context);
+	contextState = new ContextState(context, apiClient);
 	await contextState.load();
 
-	// 3. Initialize services
 	projectIndexer = new ProjectIndexer(contextState, outputChannel);
 	incrementalUpdater = new IncrementalUpdater(contextState, outputChannel);
 
-	// 4. Initialize context status view
 	contextStatusView = new ContextStatusView(contextState);
 	const treeView = vscode.window.createTreeView('lltContextView', {
 		treeDataProvider: contextStatusView,
 		showCollapseAll: false
 	});
 	context.subscriptions.push(treeView);
+    contextStatusView.setStatus('initializing');
 
-	// 5. Register Phase 1 commands
 	registerContextCommands(context, contextState, projectIndexer, contextStatusView, outputChannel);
 
-	// 6. Check indexing state and trigger auto-indexing if needed
-	await autoIndexOnStartup(contextState, projectIndexer, contextStatusView, outputChannel);
+    // Run startup logic without blocking extension activation
+	autoIndexOnStartup(contextState, projectIndexer, contextStatusView, outputChannel).then(() => {
+        incrementalUpdater!.startMonitoring();
+        context.subscriptions.push(incrementalUpdater!);
+        outputChannel.appendLine('File monitoring started for incremental updates.');
+    });
 
-	// 7. Start file monitoring for incremental updates
-	incrementalUpdater.startMonitoring();
-	context.subscriptions.push(incrementalUpdater);
-	outputChannel.appendLine('File monitoring started for incremental updates');
-
-	console.log('[LLT] Phase 1 Context System initialized successfully');
+	console.log('[LLT] Phase 1 Context System initialized');
 
 	// ===== Phase 0 Debug Feature (EXPERIMENTAL) =====
 	const extractSymbolsCommandDisposable = vscode.commands.registerCommand('llt.debug.extractSymbols', extractSymbolsCommand);
@@ -112,14 +108,10 @@ export async function activate(context: vscode.ExtensionContext) {
 	const diagnosticCommandDisposable = vscode.commands.registerCommand('llt.debug.diagnostic', runDiagnostic);
 	context.subscriptions.push(diagnosticCommandDisposable);
 
-	// ... (rest of the existing extension.ts code remains unchanged)
-
 	// ===== Test Generation Feature =====
-	// Initialize status bar for test generation
 	const testGenStatusBar = new TestGenerationStatusBar();
 	context.subscriptions.push(testGenStatusBar);
 
-	// Register CodeLens provider for Python functions
 	const codeLensProvider = new TestGenerationCodeLensProvider();
 	const codeLensDisposable = vscode.languages.registerCodeLensProvider(
 		{ language: 'python', scheme: 'file' },
@@ -127,12 +119,10 @@ export async function activate(context: vscode.ExtensionContext) {
 	);
 	context.subscriptions.push(codeLensDisposable);
 
-	// Register the "Generate Tests" command
 	const generateTestsCommand = registerGenerateTestsCommand(context, testGenStatusBar);
 	context.subscriptions.push(generateTestsCommand);
 
 	// ===== Quality Analysis Feature =====
-	// Existing code continues...
 	const qualityBackendClient = new QualityBackendClient();
 	const qualityTreeProvider = new QualityTreeProvider();
 	const qualityStatusBar = new QualityStatusBarManager();
@@ -140,19 +130,13 @@ export async function activate(context: vscode.ExtensionContext) {
 	const suggestionProvider = new QualitySuggestionProvider();
 	const analyzeCommand = new AnalyzeQualityCommand(qualityBackendClient, qualityTreeProvider);
 
-	// Register tree view for quality analysis
 	const qualityTreeView = vscode.window.createTreeView('lltQualityExplorer', {
 		treeDataProvider: qualityTreeProvider,
 		showCollapseAll: true
 	});
 	context.subscriptions.push(qualityTreeView);
-
-	// ... (rest of the extension.ts continues with the existing features)
-	// For brevity, I'll add just the necessary parts...
-
-	// Coverage, Impact, Maintenance features... (keeping existing code)
 	
-	console.log('LLT Assistant extension fully activated with Phase 1 Context System');
+	console.log('LLT Assistant extension fully activated');
 }
 
 /**
@@ -165,55 +149,43 @@ function registerContextCommands(
 	statusView: ContextStatusView,
 	outputChannel: vscode.OutputChannel
 ): void {
-	// Re-index project command
 	const reindexCommand = vscode.commands.registerCommand('llt.reindexProject', async () => {
 		const confirm = await vscode.window.showWarningMessage(
-			'This will re-index all files in the workspace. Continue?',
+			'This will re-index all files in the workspace. This may take a few moments. Continue?',
 			{ modal: true },
 			'Yes', 'No'
 		);
 
-		if (confirm !== 'Yes') {
-			return;
-		}
+		if (confirm !== 'Yes') { return; }
 
-		try {
-			outputChannel.appendLine('User triggered re-index...');
-			await contextState.clear();
-			statusView.clearIndexingProgress();
-			await projectIndexer.initializeProject();
-			statusView.refresh();
-			vscode.window.showInformationMessage('Project re-indexed successfully!');
-		} catch (error: any) {
-			vscode.window.showErrorMessage(`Re-index failed: ${error.message}`);
-			outputChannel.appendLine(`Re-index error: ${error}`);
-		}
+		outputChannel.appendLine('User triggered re-index...');
+        // Clear state and re-run the startup logic
+        await contextState.clear();
+        statusView.refresh();
+		await autoIndexOnStartup(contextState, projectIndexer, statusView, outputChannel);
 	});
 
-	// Clear cache command
 	const clearCacheCommand = vscode.commands.registerCommand('llt.clearCache', async () => {
 		const confirm = await vscode.window.showWarningMessage(
-			'Clear cache? This will require re-indexing.',
+			'Are you sure you want to clear the local cache? This will require re-indexing.',
+			{ modal: true },
 			'Yes', 'No'
 		);
 
-		if (confirm !== 'Yes') {
-			return;
-		}
+		if (confirm !== 'Yes') { return; }
 
 		try {
 			outputChannel.appendLine('Clearing cache...');
 			await contextState.clear();
-			statusView.refresh();
-			vscode.window.showInformationMessage('Cache cleared. Project will be indexed on next startup.');
+            statusView.setStatus('notIndexed');
+			vscode.window.showInformationMessage('Cache cleared. Please re-index the project.');
 			outputChannel.appendLine('Cache cleared successfully');
 		} catch (error: any) {
-			vscode.window.showErrorMessage(`Clear cache failed: ${error.message}`);
+			vscode.window.showErrorMessage(`Failed to clear cache: ${error.message}`);
 			outputChannel.appendLine(`Clear cache error: ${error}`);
 		}
 	});
 
-	// View logs command
 	const viewLogsCommand = vscode.commands.registerCommand('llt.viewLogs', () => {
 		outputChannel.show();
 	});
@@ -222,7 +194,7 @@ function registerContextCommands(
 }
 
 /**
- * Auto-indexing on startup logic
+ * Handles the logic for indexing the project on startup, including LSP checks and cache validation.
  */
 async function autoIndexOnStartup(
 	contextState: ContextState,
@@ -230,88 +202,113 @@ async function autoIndexOnStartup(
 	statusView: ContextStatusView,
 	outputChannel: vscode.OutputChannel
 ): Promise<void> {
-	// Check if we have a valid workspace
 	if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
-		outputChannel.appendLine('No workspace open, skipping auto-indexing');
+		outputChannel.appendLine('No workspace open, skipping auto-indexing.');
+        statusView.setStatus('notIndexed');
 		return;
 	}
 
-	// Check cache state
+    // Phase 1: Wait for LSP to be ready
+    outputChannel.appendLine('Waiting for Python LSP to be ready...');
+    statusView.setStatus('waitingForLSP');
+    await sleep(3000); // Initial 3s delay
+
+    const lspReady = await waitForLSP();
+    if (!lspReady) {
+        outputChannel.appendLine('❌ Python LSP not ready after multiple retries.');
+        statusView.setStatus('lspNotReady');
+        vscode.window.showWarningMessage(
+            'Python LSP is not ready. Context indexing postponed. Please ensure the Python extension is installed and running.',
+            'Try Again'
+        ).then(selection => {
+            if (selection === 'Try Again') {
+                vscode.commands.executeCommand('llt.reindexProject');
+            }
+        });
+        return;
+    }
+    outputChannel.appendLine('✅ LSP is ready.');
+
+	// Phase 2: Check cache state
 	const isIndexed = contextState.isIndexed();
-	const isValid = contextState.isValid();
+	const isValid = await contextState.isValid();
 
-	if (!isIndexed) {
-		// First time opening workspace
-		outputChannel.appendLine('First time opening workspace, indexing...');
-		await projectIndexer.initializeProject();
-		statusView.refresh();
-	} else if (!isValid) {
-		// Cache is outdated - prompt user
-		outputChannel.appendLine('Cache is outdated or invalid');
-		
-		const action = await vscode.window.showInformationMessage(
-			'Project cache is outdated. Re-index?',
-			'Yes', 'Later'
-		);
+    try {
+        if (!isIndexed) {
+            outputChannel.appendLine('Project has not been indexed. Starting initial indexing...');
+            await projectIndexer.initializeProject();
+            vscode.window.showInformationMessage('Project indexed successfully!');
+        } else if (!isValid) {
+            outputChannel.appendLine('Cache is outdated or invalid.');
+            const action = await vscode.window.showWarningMessage(
+                'Project cache is outdated. Re-index to update context?',
+                { modal: true },
+                'Re-index Now', 'Later'
+            );
+            if (action === 'Re-index Now') {
+                outputChannel.appendLine('User chose to re-index an outdated cache.');
+                await projectIndexer.initializeProject();
+                vscode.window.showInformationMessage('Project re-indexed successfully!');
+            } else {
+                outputChannel.appendLine('User skipped re-indexing. Context features may be stale.');
+                statusView.setStatus('outdated');
+            }
+        } else {
+            const cache = contextState.getCache()!;
+            outputChannel.appendLine(
+                `Using valid cache. Files: ${cache.statistics.totalFiles}, Symbols: ${cache.statistics.totalSymbols}`
+            );
+            statusView.setStatus('indexed');
+        }
+    } catch (error: any) {
+        outputChannel.appendLine(`❌ Indexing failed: ${error.message}`);
+        if (error.code === 'ECONNREFUSED') {
+            statusView.setStatus('backendDown');
+            vscode.window.showErrorMessage(
+                'Cannot connect to LLT backend. Please ensure the service is running and configured correctly.',
+                'Retry', 'Open Settings'
+            ).then(selection => {
+                if (selection === 'Retry') {
+                    vscode.commands.executeCommand('llt.reindexProject');
+                } else if (selection === 'Open Settings') {
+                    vscode.commands.executeCommand('workbench.action.openSettings', 'llt-assistant.backendUrl');
+                }
+            });
+        } else {
+            statusView.setStatus('notIndexed');
+            vscode.window.showErrorMessage(`An error occurred during indexing: ${error.message}`);
+        }
+    }
 
-		if (action === 'Yes') {
-			outputChannel.appendLine('User chose to re-index');
-			await projectIndexer.initializeProject();
-			statusView.refresh();
-		} else {
-			outputChannel.appendLine('User skipped re-indexing');
-			// Still refresh view to show "cache outdated" status
-			statusView.refresh();
-		}
-	} else {
-		// Cache is valid - use it
-		const cache = contextState.getCache();
-		outputChannel.appendLine(
-			`Using cached project context: ${cache?.statistics.totalFiles || 0} files, ${cache?.statistics.totalSymbols || 0} symbols`
-		);
-		statusView.refresh();
-	}
+    statusView.refresh();
 }
-
-// ... (keep the existing registerGenerateTestsCommand function unchanged)
 
 /**
  * Extension deactivation
- * Called when the extension is deactivated
  */
 export async function deactivate() {
 	console.log('[LLT] Extension deactivating...');
-
 	try {
-		// Cancel ongoing indexing if in progress
 		if (projectIndexer?.isIndexing()) {
 			console.log('[LLT] Cancelling ongoing indexing...');
 			projectIndexer.cancel();
-			// Wait a bit for cancellation to complete
-			await new Promise(resolve => setTimeout(resolve, 1000));
+			await sleep(1000);
 		}
-
-		// Save cache state
 		if (contextState) {
 			console.log('[LLT] Saving cache state...');
 			await contextState.save();
 		}
-
-		// Stop file monitoring
 		if (incrementalUpdater) {
 			console.log('[LLT] Stopping file monitoring...');
 			incrementalUpdater.dispose();
 		}
-
 		console.log('[LLT] LLT Assistant deactivated cleanly');
 	} catch (error) {
 		console.error('[LLT] Error during deactivation:', error);
 	}
 }
 
-// Rest of the existing functions (registerGenerateTestsCommand) would go here
-// For brevity, I won't duplicate the entire 800-line file, just showing the integration points
-
+// ... (rest of the file remains unchanged)
 function registerGenerateTestsCommand(
 	context: vscode.ExtensionContext,
 	statusBar: TestGenerationStatusBar
