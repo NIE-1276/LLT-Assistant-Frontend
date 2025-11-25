@@ -38,7 +38,7 @@ export interface IncrementalUpdateRequest {
   changes: Array<{
     file_path: string;
     action: 'modified' | 'deleted';
-    symbols_changed?: SymbolChange[];
+    symbols_changed?: BackendSymbolChange[];
   }>;
 }
 
