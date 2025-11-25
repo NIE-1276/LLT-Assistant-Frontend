@@ -197,7 +197,30 @@ function registerContextCommands(
 			await vscode.commands.executeCommand('llt.reindexProject');
 		});
 
-		context.subscriptions.push(reindexCommand, clearCacheCommand, viewLogsCommand, retryIndexCommand);
+	const testCacheCommand = vscode.commands.registerCommand('llt.debug.testCache', async () => {
+		outputChannel.appendLine('=== CACHE DEBUG TEST ===');
+		outputChannel.appendLine('Testing cache save and load cycle...');
+		
+		try {
+			outputChannel.appendLine('1. Testing save...');
+			await contextState.save();
+			outputChannel.appendLine('   Save completed');
+			
+			outputChannel.appendLine('2. Testing load...');
+			const loaded = await contextState.load();
+			outputChannel.appendLine(f'   Load result: {loaded ? "SUCCESS" : "FAILED"}');
+			if (loaded) {
+				outputChannel.appendLine(f'   Loaded projectId: {loaded.projectId}');
+				outputChannel.appendLine(f'   Loaded files: {loaded.statistics.totalFiles}');
+			}
+			
+			outputChannel.appendLine('=== CACHE TEST COMPLETE ===');
+		} catch (error: any) {
+			outputChannel.appendLine(`❌ Cache test failed: ${error.message}`);
+		}
+	});
+
+		context.subscriptions.push(reindexCommand, clearCacheCommand, viewLogsCommand, retryIndexCommand, testCacheCommand);
 }
 
 /**

@@ -392,8 +392,21 @@ export class ProjectIndexer {
           const response = await this.sendToBackend(extractedData);
 
           // Save cache to persistent storage
-          await this.contextState.save();
-          this.outputChannel.appendLine('Cache saved successfully');
+          this.outputChannel.appendLine('[LLT] Starting cache save operation...');
+          try {
+            await this.contextState.save();
+            this.outputChannel.appendLine('✅ Cache save completed successfully');
+            
+            // Verify the save actually worked
+            const cache = this.contextState.getCache();
+            this.outputChannel.appendLine(`[LLT] Verification - cache after save: ${cache ? 'EXISTS' : 'NULL'}`);
+            if (cache) {
+              this.outputChannel.appendLine(`[LLT] Verification - projectId: ${cache.projectId}, files: ${cache.statistics.totalFiles}`);
+            }
+          } catch (saveError) {
+            this.outputChannel.appendLine(`❌ Cache save failed: ${saveError}`);
+            throw saveError;
+          }
 
           // Final progress update
           progress.report({
@@ -408,8 +421,23 @@ export class ProjectIndexer {
       );
 
       // Double-check cache is saved
-      await this.contextState.save();
-      this.outputChannel.appendLine('✅ Cache saved to disk successfully');
+      this.outputChannel.appendLine('[LLT] Performing final cache verification...');
+      try {
+        await this.contextState.save();
+        this.outputChannel.appendLine('✅ Final cache save completed');
+        
+        // Wait a bit for VSCode to flush workspace state
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Now try to load it back to verify persistence
+        const testLoad = await this.contextState.load();
+        this.outputChannel.appendLine(`[LLT] Persistence test - load after save: ${testLoad ? 'SUCCESS' : 'FAILED'}`);
+        if (testLoad) {
+          this.outputChannel.appendLine(`[LLT] Persistence test - projectId: ${testLoad.projectId}`);
+        }
+      } catch (finalSaveError) {
+        this.outputChannel.appendLine(`❌ Final cache save failed: ${finalSaveError}`);
+      }
 
       console.log('[LLT ProjectIndexer] Project initialization complete');
     } catch (error: any) {
