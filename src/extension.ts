@@ -208,10 +208,10 @@ function registerContextCommands(
 			
 			outputChannel.appendLine('2. Testing load...');
 			const loaded = await contextState.load();
-			outputChannel.appendLine(f'   Load result: {loaded ? "SUCCESS" : "FAILED"}');
+			outputChannel.appendLine(`   Load result: ${loaded ? 'SUCCESS' : 'FAILED'}`);
 			if (loaded) {
-				outputChannel.appendLine(f'   Loaded projectId: {loaded.projectId}');
-				outputChannel.appendLine(f'   Loaded files: {loaded.statistics.totalFiles}');
+				outputChannel.appendLine(`   Loaded projectId: ${loaded.projectId}`);
+				outputChannel.appendLine(`   Loaded files: ${loaded.statistics.totalFiles}`);
 			}
 			
 			outputChannel.appendLine('=== CACHE TEST COMPLETE ===');
