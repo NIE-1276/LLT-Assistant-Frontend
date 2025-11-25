@@ -251,15 +251,26 @@ async function autoIndexOnStartup(
     outputChannel.appendLine('✅ LSP is ready.');
 
 	// Phase 2: Check cache state
+	outputChannel.appendLine('[LLT] Checking cache state...');
 	const isIndexed = contextState.isIndexed();
 	const isValid = await contextState.isValid();
+	outputChannel.appendLine(`[LLT] Cache check complete: isIndexed=${isIndexed}, isValid=${isValid}`);
+	
+	// Debug: Log current cache content
+	const cache = contextState.getCache();
+	outputChannel.appendLine(`[LLT] Current cache content: ${cache ? 'EXISTS' : 'NULL'}`);
+	if (cache) {
+		outputChannel.appendLine(`[LLT] Cache details: projectId=${cache.projectId}, workspace=${cache.workspacePath}, files=${cache.statistics.totalFiles}`);
+	}
 
     try {
         if (!isIndexed) {
+            outputChannel.appendLine('[LLT] ⚠️ Branch 1: !isIndexed - no cache found or empty project');
             outputChannel.appendLine('Project has not been indexed. Starting initial indexing...');
             await projectIndexer.initializeProject();
             vscode.window.showInformationMessage('Project indexed successfully!');
         } else if (!isValid) {
+            outputChannel.appendLine('[LLT] ⚠️ Branch 2: isIndexed && !isValid - cache exists but is stale');
             outputChannel.appendLine('Cache is outdated or invalid.');
             const action = await vscode.window.showWarningMessage(
                 'Project cache is outdated. Re-index to update context?',
@@ -275,6 +286,7 @@ async function autoIndexOnStartup(
                 statusView.setStatus('outdated');
             }
         } else {
+            outputChannel.appendLine('[LLT] ✅ Branch 3: isIndexed && isValid - cache is valid, skipping indexing');
             const cache = contextState.getCache()!;
             outputChannel.appendLine(
                 `Using valid cache. Files: ${cache.statistics.totalFiles}, Symbols: ${cache.statistics.totalSymbols}`

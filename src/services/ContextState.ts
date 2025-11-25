@@ -67,11 +67,24 @@ export class ContextState {
    */
   async load(): Promise<ProjectCache | null> {
     try {
+      console.log('[LLT ContextState] Attempting to load cache from workspace state...');
       const data = this.context.workspaceState.get<SerializedCache>(this.CACHE_KEY);
       
       if (!data) {
+        console.log('[LLT ContextState] No cache found in workspace state (returns null)');
         return null;
       }
+
+      console.log('[LLT ContextState] Raw cache data loaded:', JSON.stringify({
+        hasProjectId: !!data.projectId,
+        hasWorkspacePath: !!data.workspacePath,
+        hasLastIndexedAt: !!data.lastIndexedAt,
+        projectId: data.projectId,
+        workspacePath: data.workspacePath,
+        lastIndexedAt: data.lastIndexedAt,
+        version: data.version,
+        statistics: data.statistics
+      }, null, 2));
 
       // Validate basic structure
       if (!data.projectId || !data.workspacePath || !data.lastIndexedAt) {
@@ -118,10 +131,23 @@ export class ContextState {
    */
   async save(): Promise<void> {
     if (!this.cache) {
+      console.warn('[LLT ContextState] save() called but cache is null, skipping');
       return;
     }
 
     try {
+      console.log('[LLT ContextState] Starting cache save operation...');
+      console.log('[LLT ContextState] Current cache state:', JSON.stringify({
+        projectId: this.cache.projectId,
+        workspacePath: this.cache.workspacePath,
+        lastIndexedAt: this.cache.lastIndexedAt.toISOString(),
+        version: this.cache.version,
+        backendVersion: this.cache.backendVersion,
+        totalFiles: this.cache.statistics.totalFiles,
+        totalSymbols: this.cache.statistics.totalSymbols,
+        fileCount: this.cache.fileSymbols.size
+      }, null, 2));
+
       // Serialize Map to Object
       const fileSymbols: Record<string, SymbolInfo[]> = {};
       for (const [path, symbols] of this.cache.fileSymbols.entries()) {
@@ -138,10 +164,24 @@ export class ContextState {
         statistics: this.cache.statistics
       };
 
+      console.log('[LLT ContextState] Serialized cache data:', JSON.stringify({
+        hasProjectId: !!data.projectId,
+        hasWorkspacePath: !!data.workspacePath,
+        hasLastIndexedAt: !!data.lastIndexedAt,
+        version: data.version,
+        totalFiles: data.statistics.totalFiles,
+        totalSymbols: data.statistics.totalSymbols,
+        keys: Object.keys(data)
+      }, null, 2));
+
       await this.context.workspaceState.update(this.CACHE_KEY, data);
-      console.log('[LLT ContextState] Cache saved to workspace state');
+      console.log('[LLT ContextState] ✅ Cache successfully saved to workspace state');
+      
+      // Verify it was actually saved
+      const verifyData = this.context.workspaceState.get(this.CACHE_KEY);
+      console.log('[LLT ContextState] Verification - data retrieved after save:', !!verifyData);
     } catch (error) {
-      console.error('[LLT ContextState] Error saving cache:', error);
+      console.error('[LLT ContextState] ❌ Error saving cache:', error);
       throw error;
     }
   }
