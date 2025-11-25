@@ -146,6 +146,9 @@ class TaskPoller {
 
       const taskStatus = response.data;
 
+      // Log polling response
+      console.log(`[Test Generation] Polling Response [${taskStatus.status}]:`, JSON.stringify(taskStatus, null, 2));
+
       // Handle different statuses
       switch (taskStatus.status) {
         case 'pending':
@@ -270,6 +273,8 @@ class TaskPoller {
    * Emit event to callback
    */
   private emitEvent(event: PollingEvent): void {
+    // Log status transitions
+    console.log(`[Test Generation] Status Transition: ${event.type}`);
     if (this.eventCallback) {
       this.eventCallback(event);
     }

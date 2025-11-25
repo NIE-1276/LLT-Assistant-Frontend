@@ -33,6 +33,9 @@ export class BackendApiClient {
    */
   async generateTestsAsync(request: GenerateTestsRequest): Promise<AsyncJobResponse> {
     try {
+      // Log the full request payload
+      console.log('[Test Generation] Request Payload:', JSON.stringify(request, null, 2));
+
       const response = await axios.post<AsyncJobResponse>(
         `${this.baseUrl}/workflows/generate-tests`,
         request,
@@ -43,10 +46,13 @@ export class BackendApiClient {
         }
       );
 
+      // Log the initial response object
+      console.log('[Test Generation] Initial Response:', JSON.stringify(response.data, null, 2));
+
       return response.data;
     } catch (error) {
       const formattedError = this.handleAxiosError(error);
-      console.error('[Backend API] Generate tests async error:', formattedError);
+      console.error('[Test Generation] Error Object:', formattedError);
       throw formattedError;
     }
   }
