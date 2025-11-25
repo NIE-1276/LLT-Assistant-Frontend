@@ -199,6 +199,10 @@
         "title": "LLT: View Logs"
       },
       {
+        "command": "llt.debug.testCache",
+        "title": "LLT: Test Cache (Debug)"
+      },
+      {
         "command": "llt.debug.extractSymbols",
         "title": "LLT Debug: Extract Symbols from Current File"
       },
