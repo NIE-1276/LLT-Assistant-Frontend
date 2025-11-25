@@ -417,13 +417,36 @@ export class ProjectIndexer {
    */
   async reindexProject(): Promise<void> {
     try {
-      // Clear existing cache
+      const projectId = this.contextState.getProjectId();
+      
+      // Step 1: Delete backend data if project exists
+      if (projectId) {
+        this.outputChannel.appendLine('Deleting existing backend data...');
+        try {
+          await this.apiClient.deleteProject(projectId);
+          this.outputChannel.appendLine('✅ Backend data deleted successfully');
+        } catch (error: any) {
+          // If project doesn't exist (404), that's okay - continue with re-index
+          if (error.code === 'NOT_FOUND') {
+            this.outputChannel.appendLine('⚠️ Backend project not found, continuing with fresh index');
+          } else {
+            throw error;
+          }
+        }
+      }
+      
+      // Step 2: Clear local cache
+      this.outputChannel.appendLine('Clearing local cache...');
       await this.contextState.clear();
       
-      // Start fresh indexing
+      // Step 3: Start fresh indexing
+      this.outputChannel.appendLine('Starting fresh indexing...');
       await this.initializeProject();
+      
+      this.outputChannel.appendLine('✅ Re-index complete');
     } catch (error: any) {
       console.error('[LLT ProjectIndexer] Re-index failed:', error);
+      this.outputChannel.appendLine(`❌ Re-index failed: ${error.message}`);
       throw error;
     }
   }
