@@ -154,6 +154,57 @@ export async function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(qualityTreeView);
 
 	console.log('LLT Assistant extension fully activated');
+	
+	// ===== Impact Analysis Feature (Feature 3) =====
+	console.log('[LLT Impact] Initializing Impact Analysis feature...');
+	
+	try {
+		const impactClient = new ImpactAnalysisClient();
+		const impactTreeProvider = new ImpactTreeProvider();
+		const analyzeImpactCommand = new AnalyzeImpactCommand(impactClient, impactTreeProvider);
+
+		// Register Impact Analysis commands
+		const analyzeImpactDisposable = vscode.commands.registerCommand('llt-assistant.analyzeImpact', () => {
+			console.log('[LLT Impact] Command llt-assistant.analyzeImpact triggered');
+			analyzeImpactCommand.execute();
+		});
+		context.subscriptions.push(analyzeImpactDisposable);
+
+		const refreshImpactDisposable = vscode.commands.registerCommand('llt-assistant.refreshImpactView', () => {
+			console.log('[LLT Impact] Command llt-assistant.refreshImpactView triggered');
+			// Just refresh the tree - no data is fetched, this clears the view
+			impactTreeProvider.clear();
+		});
+		context.subscriptions.push(refreshImpactDisposable);
+
+		const clearImpactDisposable = vscode.commands.registerCommand('llt-assistant.clearImpactView', () => {
+			console.log('[LLT Impact] Command llt-assistant.clearImpactView triggered');
+			impactTreeProvider.clear();
+		});
+		context.subscriptions.push(clearImpactDisposable);
+
+		// Switch view mode command
+		const switchImpactViewDisposable = vscode.commands.registerCommand('llt-assistant.switchImpactView', () => {
+			console.log('[LLT Impact] Command llt-assistant.switchImpactView triggered');
+			const currentMode = impactTreeProvider.getCurrentViewMode();
+			const newMode = currentMode === 'file-to-tests' ? 'tests-to-files' : 'file-to-tests';
+			impactTreeProvider.switchView(newMode);
+		});
+		context.subscriptions.push(switchImpactViewDisposable);
+
+		// Create tree view for Impact Explorer
+		const impactTreeView = vscode.window.createTreeView('lltImpactExplorer', {
+			treeDataProvider: impactTreeProvider,
+			showCollapseAll: true
+		});
+		context.subscriptions.push(impactTreeView);
+
+		console.log('[LLT Impact] Impact Analysis commands registered successfully');
+	} catch (error) {
+		console.error('[LLT Impact] Error initializing Impact Analysis:', error);
+		vscode.window.showErrorMessage(`Failed to initialize Impact Analysis: ${error instanceof Error ? error.message : String(error)}`);
+	}
+	
 	console.log('[LLT Quality] Commands registered successfully');
 }
 
