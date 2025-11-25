@@ -391,6 +391,10 @@ export class ProjectIndexer {
           
           const response = await this.sendToBackend(extractedData);
 
+          // Save cache to persistent storage
+          await this.contextState.save();
+          this.outputChannel.appendLine('Cache saved successfully');
+
           // Final progress update
           progress.report({
             increment: 100,
@@ -402,6 +406,10 @@ export class ProjectIndexer {
       vscode.window.showInformationMessage(
         `Project indexed successfully! ${files.length} files processed.`
       );
+
+      // Double-check cache is saved
+      await this.contextState.save();
+      this.outputChannel.appendLine('✅ Cache saved to disk successfully');
 
       console.log('[LLT ProjectIndexer] Project initialization complete');
     } catch (error: any) {
