@@ -249,30 +249,30 @@ export class IncrementalUpdater implements vscode.Disposable {
       const oldSymbols = this.contextState.getSymbols(filePath) || [];
 
       // Calculate diff
-      const changes = this.calculateDiff(oldSymbols, newSymbols);
+      const diff = this.calculateDiff(oldSymbols, newSymbols);
 
-      if (changes.length === 0) {
+      // Convert to backend format
+      const backendChanges = this.formatDiffForBackend(diff);
+
+      if (backendChanges.length === 0) {
         console.log(`[LLT IncrementalUpdater] No changes detected for ${filePath}`);
         this.showSuccessStatus();
         return;
       }
 
-      console.log(`[LLT IncrementalUpdater] Detected ${changes.length} changes`);
-      this.outputChannel.appendLine(`Detected ${changes.length} changes`);
+      console.log(`[LLT IncrementalUpdater] Detected ${backendChanges.length} changes`);
+      this.outputChannel.appendLine(`Detected ${backendChanges.length} changes`);
 
       // Send to backend
-      await this.sendToBackend(projectId, filePath, changes);
+      await this.sendToBackend(projectId, filePath, backendChanges);
 
       // Update cache
-      if (changes.some(c => c.action === 'deleted' && !newSymbols.some((s: SymbolInfo) => s.name === c.name))) {
-        // Check if all symbols were deleted
-        if (newSymbols.length === 0) {
-          this.contextState.removeFile(filePath);
-        }
+      if (newSymbols.length === 0) {
+        this.contextState.removeFile(filePath);
       } else {
         this.contextState.setSymbols(filePath, newSymbols);
       }
-      
+
       await this.contextState.save();
 
       // Show success
