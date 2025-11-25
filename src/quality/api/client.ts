@@ -69,22 +69,67 @@ export class QualityBackendClient {
 	/**
 	 * Analyze test files for quality issues
 	 *
-	 * POST /workflows/analyze-quality
+	 * POST /quality/analyze
 	 */
 	async analyzeQuality(request: AnalyzeQualityRequest): Promise<AnalyzeQualityResponse> {
 		const maxRetries = QUALITY_DEFAULTS.RETRY_MAX_ATTEMPTS;
 		let lastError: any;
 
+		// Log full request payload
+		console.log('[LLT Quality API] ====================================================================');
+		console.log('[LLT Quality API] Request Payload:');
+		console.log('[LLT Quality API] -------------------------------------------------------------------');
+		console.log(`[LLT Quality API] Files count: ${request.files.length}`);
+		console.log(`[LLT Quality API] Mode: ${request.mode}`);
+		console.log(`[LLT Quality API] Config:`, JSON.stringify(request.config, null, 2));
+		console.log('[LLT Quality API] Sample file paths:');
+		request.files.slice(0, 3).forEach(file => console.log(`[LLT Quality API]   - ${file.path}`));
+		if (request.files.length > 3) {
+			console.log(`[LLT Quality API]   ... and ${request.files.length - 3} more files`);
+		}
+		console.log('[LLT Quality API] ====================================================================');
+
 		for (let attempt = 0; attempt < maxRetries; attempt++) {
 			try {
 				const response = await this.client.post<AnalyzeQualityResponse>(
-					'/workflows/analyze-quality',
+					'/quality/analyze',
 					request
 				);
+
+				// Log full response
+				console.log('[LLT Quality API] ====================================================================');
+				console.log('[LLT Quality API] Response Data:');
+				console.log('[LLT Quality API] -------------------------------------------------------------------');
+				console.log(`[LLT Quality API] Status: ${response.status} ${response.statusText}`);
+				console.log(`[LLT Quality API] Analysis ID: ${response.data.analysis_id}`);
+				console.log(`[LLT Quality API] Issues found: ${response.data.issues.length}`);
+				console.log(`[LLT Quality API] Summary:`, JSON.stringify(response.data.summary, null, 2));
+				if (response.data.issues.length > 0) {
+					console.log('[LLT Quality API] Sample issues:');
+					response.data.issues.slice(0, 2).forEach(issue => {
+						console.log(`[LLT Quality API]   - ${issue.severity.toUpperCase()}: ${issue.file}:${issue.line} - ${issue.message}`);
+					});
+					if (response.data.issues.length > 2) {
+						console.log(`[LLT Quality API]   ... and ${response.data.issues.length - 2} more issues`);
+					}
+				}
+				console.log('[LLT Quality API] ====================================================================');
 
 				return response.data;
 			} catch (error) {
 				lastError = error;
+
+				// Log error details before retry
+				console.error('[LLT Quality API] Request failed:');
+				console.error(`[LLT Quality API] Error type: ${error?.constructor?.name}`);
+				if (axios.isAxiosError(error) && error.response) {
+					console.error('[LLT Quality API] Response error details:');
+					console.error(`[LLT Quality API] Status: ${error.response.status}`);
+					console.error(`[LLT Quality API] Data:`, JSON.stringify(error.response.data, null, 2));
+					console.error(`[LLT Quality API] Headers:`, JSON.stringify(error.response.headers, null, 2));
+				} else {
+					console.error(`[LLT Quality API] Error:`, error);
+				}
 
 				// Check if error is retryable (network errors, timeouts, 5xx errors)
 				if (!this.isRetryableError(error)) {
