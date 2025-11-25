@@ -168,6 +168,14 @@
         "command": "llt-assistant.batchFixTests",
         "title": "LLT: Batch Fix Tests",
         "icon": "$(wrench)"
+      },
+      {
+        "command": "llt.debug.extractSymbols",
+        "title": "LLT Debug: Extract Symbols from Current File"
+      },
+      {
+        "command": "llt.debug.diagnostic",
+        "title": "LLT Debug: Run Diagnostic"
       }
     ],
     "menus": {

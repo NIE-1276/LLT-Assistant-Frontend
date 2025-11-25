@@ -45,6 +45,8 @@ import {
 	BatchFixCommand,
 	DecisionDialogManager
 } from './maintenance';
+import { extractSymbolsCommand } from './debug/commands/extractSymbols';
+import { runDiagnostic } from './debug/diagnostic';
 
 /**
  * Extension activation entry point
@@ -53,6 +55,13 @@ import {
  */
 export function activate(context: vscode.ExtensionContext) {
 	console.log('LLT Assistant extension is now active');
+
+	// ===== Phase 0 Debug Feature (EXPERIMENTAL) =====
+	const extractSymbolsCommandDisposable = vscode.commands.registerCommand('llt.debug.extractSymbols', extractSymbolsCommand);
+	context.subscriptions.push(extractSymbolsCommandDisposable);
+	
+	const diagnosticCommandDisposable = vscode.commands.registerCommand('llt.debug.diagnostic', runDiagnostic);
+	context.subscriptions.push(diagnosticCommandDisposable);
 
 	// ===== Test Generation Feature =====
 	// Initialize status bar for test generation
