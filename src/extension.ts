@@ -172,6 +172,36 @@ export async function activate(context: vscode.ExtensionContext) {
 	});
 	context.subscriptions.push(clearQualityDisposable);
 
+	// Register showIssue command (used by Quality tree view items)
+	const showIssueDisposable = vscode.commands.registerCommand(
+		'llt-assistant.showIssue',
+		async (issue: any) => {
+			console.log('[LLT Quality] Command llt-assistant.showIssue triggered');
+			try {
+				// Open the file and navigate to the issue location
+				const document = await vscode.workspace.openTextDocument(issue.file);
+				const editor = await vscode.window.showTextDocument(document);
+
+				// Convert to 0-based line number (issue.line is 1-based)
+				const line = Math.max(0, issue.line - 1);
+				const column = Math.max(0, issue.column || 0);
+
+				const position = new vscode.Position(line, column);
+				const range = new vscode.Range(position, position);
+
+				// Reveal and select the issue location
+				editor.selection = new vscode.Selection(position, position);
+				editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+			} catch (error: any) {
+				vscode.window.showErrorMessage(
+					`Failed to show issue: ${error.message || error}`
+				);
+				console.error('[LLT Quality] Error showing issue:', error);
+			}
+		}
+	);
+	context.subscriptions.push(showIssueDisposable);
+
 	const qualityTreeView = vscode.window.createTreeView('lltQualityExplorer', {
 		treeDataProvider: qualityTreeProvider,
 		showCollapseAll: true
@@ -308,6 +338,16 @@ export async function activate(context: vscode.ExtensionContext) {
 			}
 		);
 		context.subscriptions.push(showCoverageItemDisposable);
+
+		// Register goToLine command (used by Impact tree view)
+		const goToLineDisposable = vscode.commands.registerCommand(
+			'llt-assistant.goToLine',
+			(filePath: string, line: number) => {
+				console.log('[LLT Coverage] Command llt-assistant.goToLine triggered');
+				coverageCommands.goToLine(filePath, line);
+			}
+		);
+		context.subscriptions.push(goToLineDisposable);
 
 		// Create tree view for Coverage Explorer
 		const coverageTreeView = vscode.window.createTreeView('lltCoverageExplorer', {

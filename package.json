@@ -94,6 +94,10 @@
         "icon": "$(clear-all)"
       },
       {
+        "command": "llt-assistant.showIssue",
+        "title": "LLT: Show Quality Issue"
+      },
+      {
         "command": "llt-assistant.analyzeCoverage",
         "title": "LLT: Analyze Coverage",
         "icon": "$(graph)"
@@ -127,6 +131,14 @@
       {
         "command": "llt-assistant.showCoverageItem",
         "title": "LLT: Show Coverage Item"
+      },
+      {
+        "command": "llt-assistant.coverageCodeLensYes",
+        "title": "LLT: Generate Test for Coverage"
+      },
+      {
+        "command": "llt-assistant.coverageCodeLensNo",
+        "title": "LLT: Cancel Coverage Test Generation"
       },
       {
         "command": "llt-assistant.analyzeImpact",
