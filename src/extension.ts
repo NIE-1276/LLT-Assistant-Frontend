@@ -31,14 +31,6 @@ import {
 	AnalyzeImpactCommand,
 	RegenerationDialogManager
 } from './impact';
-import {
-	MaintenanceBackendClient,
-	GitDiffAnalyzer,
-	MaintenanceTreeProvider,
-	AnalyzeMaintenanceCommand,
-	BatchFixCommand,
-	DecisionDialogManager
-} from './maintenance';
 import { extractSymbolsCommand } from './debug/commands/extractSymbols';
 import { runDiagnostic } from './debug/diagnostic';
 
