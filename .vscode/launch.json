@@ -7,7 +7,7 @@
       "request": "launch",
       "args": [
         "--extensionDevelopmentPath=${workspaceFolder}",
-        "/Users/efan404/Codes/courses/CityU_CS5351/LLT-Assistant-VSCode/test_plan_T3"
+        "/Users/efan404/Codes/courses/CityU_CS5351/LLT-Assistant-VSCode/feat1_test_project"
         // "/Users/efan404/Downloads/test-LLT"
       ],
       "outFiles": [

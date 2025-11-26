@@ -1,12 +1,32 @@
 ## [Feature 1] Frontend Regeneration Mode Detection
 
-**Status:** Open  
+**Status:** ✅ Fixed (2025-11-25)  
 **Impact:** Low (LLM Context Context only)  
-**Priority:** Medium
+**Priority:** Medium  
+**Fixed By:** Decoupling Strategy (initialMode vs finalMode)  
+**Fix Commit:** TBD
 
 ### Description
 
 The `mode` variable in `registerGenerateTestsCommand` defaults to 'new'. It should auto-detect 'regenerate' if `existingTestCode` is found.
+
+### Resolution Summary
+
+**Fix Strategy Applied:** Decoupled UI decision logic from final API mode
+
+**Implementation:**
+1. Renamed `const mode` → `const initialMode` (line 448)
+2. Updated UI logic to use `initialMode` (line 495)
+3. Added `const finalMode` after file check (line 516):
+   ```typescript
+   const finalMode = existingTestCode ? 'regenerate' : initialMode;
+   ```
+4. Updated API request to use `finalMode` (line 534)
+
+**Result:**
+- When regenerating tests → backend receives `mode: "regenerate"`
+- When generating new tests → backend receives `mode: "new"`
+- UI behavior remains unchanged
 
 ### Technical Details
 

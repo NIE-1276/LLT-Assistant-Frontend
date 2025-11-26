@@ -445,7 +445,8 @@ function registerGenerateTestsCommand(
 		targetFunction?: string;
 	}) => {
 		try {
-			const mode = args?.mode || 'new';
+			// --- Step 1: Rename variable for UI decision ---
+			const initialMode = args?.mode || 'new';
 
 			const editor = vscode.window.activeTextEditor;
 			if (!editor) {
@@ -490,7 +491,8 @@ function registerGenerateTestsCommand(
 
 			let userDescription: string | undefined;
 
-			if (mode === 'new') {
+			// --- Step 2: Update UI decision logic ---
+			if (initialMode === 'new') {
 				const input = await UIDialogs.showTestDescriptionInput({
 					prompt: 'Describe your test requirements (optional - press Enter to skip)',
 					placeHolder: 'e.g., Focus on edge cases, test error handling...'
@@ -510,6 +512,9 @@ function registerGenerateTestsCommand(
 				? await CodeAnalyzer.readFileContent(existingTestFilePath)
 				: null;
 
+			// --- Step 3: Add final mode decision logic here ---
+			const finalMode = existingTestCode ? 'regenerate' : initialMode;
+
 			const configManager = new ConfigurationManager();
 			const validation = configManager.validateConfiguration();
 			if (!validation.valid) {
@@ -520,12 +525,13 @@ function registerGenerateTestsCommand(
 				return;
 			}
 
+			// --- Step 4: Update API request body ---
 			const request: GenerateTestsRequest = {
 				source_code: sourceCode,
 				user_description: userDescription,
 				existing_test_code: existingTestCode || undefined,
 				context: {
-					mode: mode,
+					mode: finalMode, // <-- Use finalMode
 					target_function: functionName
 				}
 			};
