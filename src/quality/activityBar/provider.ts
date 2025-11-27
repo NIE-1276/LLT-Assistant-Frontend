@@ -146,13 +146,16 @@ export class QualityTreeProvider implements vscode.TreeDataProvider<QualityTreeI
 	 * Create file item
 	 */
 	private createFileItem(filePath: string, issues: QualityIssue[]): QualityTreeItem {
-		const fileName = filePath.split('/').pop() || filePath;
+		// Defensive: Handle undefined/null filePath
+		const safeFilePath = filePath || 'Unknown file';
+		const fileName = safeFilePath.split('/').pop() || safeFilePath;
+
 		const criticalCount = issues.filter(
 			i => i.severity === 'error'
 		).length;
 
 		const tooltip = new vscode.MarkdownString();
-		tooltip.appendMarkdown(`**${filePath}**\n\n`);
+		tooltip.appendMarkdown(`**${safeFilePath}**\n\n`);
 		tooltip.appendMarkdown(`- Total Issues: ${issues.length}\n`);
 		tooltip.appendMarkdown(`- Critical: ${criticalCount}\n`);
 
@@ -163,7 +166,7 @@ export class QualityTreeProvider implements vscode.TreeDataProvider<QualityTreeI
 			tooltip: tooltip,
 			collapsibleState: vscode.TreeItemCollapsibleState.Expanded,
 			contextValue: 'file',
-			filePath: filePath,
+			filePath: safeFilePath,
 			issueCount: issues.length,
 			iconPath: new vscode.ThemeIcon('file-code')
 		};
@@ -234,11 +237,14 @@ export class QualityTreeProvider implements vscode.TreeDataProvider<QualityTreeI
 		const filteredIssues = this.getFilteredIssues();
 
 		for (const issue of filteredIssues) {
-			const issues = fileMap.get(issue.file);
+			// Defensive: Handle undefined/null file field from backend
+			const filePath = issue.file || 'Unknown file';
+
+			const issues = fileMap.get(filePath);
 			if (issues) {
 				issues.push(issue);
 			} else {
-				fileMap.set(issue.file, [issue]);
+				fileMap.set(filePath, [issue]);
 			}
 		}
 

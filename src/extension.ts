@@ -178,6 +178,15 @@ export async function activate(context: vscode.ExtensionContext) {
 		async (issue: any) => {
 			console.log('[LLT Quality] Command llt-assistant.showIssue triggered');
 			try {
+				// Defensive: Check if file field is valid
+				if (!issue.file || issue.file === 'Unknown file') {
+					vscode.window.showWarningMessage(
+						`Cannot navigate to issue: file path is missing (backend returned undefined)`
+					);
+					console.warn('[LLT Quality] Issue has undefined file field:', issue);
+					return;
+				}
+
 				// Open the file and navigate to the issue location
 				const document = await vscode.workspace.openTextDocument(issue.file);
 				const editor = await vscode.window.showTextDocument(document);
