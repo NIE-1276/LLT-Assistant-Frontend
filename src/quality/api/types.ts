@@ -149,6 +149,37 @@ export interface BackendError {
 }
 
 /**
+ * Task status from async task poller
+ */
+export type TaskStatus = 'pending' | 'processing' | 'completed' | 'failed';
+
+/**
+ * Async job response for quality analysis
+ * Returned when submitting async analysis request
+ */
+export interface AsyncJobResponse {
+	task_id: string;
+	status: TaskStatus;
+	estimated_time_seconds?: number;
+}
+
+/**
+ * Task status response
+ * Used for polling task status via GET /tasks/{task_id}
+ */
+export interface TaskStatusResponse {
+	task_id: string;
+	status: TaskStatus;
+	created_at?: string;
+	updated_at?: string;
+	result?: AnalyzeQualityResponse;
+	error?: {
+		message: string;
+		code?: string;
+	} | null;
+}
+
+/**
  * Health check response
  */
 export interface HealthCheckResponse {
