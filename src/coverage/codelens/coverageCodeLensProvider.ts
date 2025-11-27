@@ -68,7 +68,7 @@ export class CoverageCodeLensProvider implements vscode.CodeLensProvider {
 				const yesLens = new vscode.CodeLens(req.range, {
 					title: '⚡ $(zap) ▶ GENERATE TEST ▶',
 					tooltip: 'Click to generate tests for this uncovered code',
-					command: 'llt-assistant.coverageCodeLens.yes',
+					command: 'llt-assistant.coverageCodeLensYes',
 					arguments: [req.filePath, req.func, req.uri, req.range]
 				});
 
@@ -76,7 +76,7 @@ export class CoverageCodeLensProvider implements vscode.CodeLensProvider {
 				const noLens = new vscode.CodeLens(req.range, {
 					title: '✕ $(close) ✕ CANCEL ✕',
 					tooltip: 'Ignore this suggestion',
-					command: 'llt-assistant.coverageCodeLens.no',
+					command: 'llt-assistant.coverageCodeLensNo',
 					arguments: [req.uri, req.range]
 				});
 

@@ -115,6 +115,16 @@ export interface UncoveredRange {
 }
 
 /**
+ * Debug options for testing error handling
+ * Backend will simulate errors when these options are set
+ */
+export interface DebugOptions {
+	simulate_error?: boolean;
+	error_message?: string;
+	error_code?: string | null;
+}
+
+/**
  * Coverage optimization request
  */
 export interface CoverageOptimizationRequest {
@@ -122,6 +132,7 @@ export interface CoverageOptimizationRequest {
 	existing_test_code: string;
 	uncovered_ranges: UncoveredRange[];
 	framework: string;
+	debug_options?: DebugOptions;
 }
 
 /**
@@ -142,6 +153,14 @@ export interface CoverageOptimizationResult {
 }
 
 /**
+ * Task error response from backend
+ */
+export interface TaskError {
+	message: string;
+	code?: string | null;
+}
+
+/**
  * Task status response for async operations
  */
 export interface TaskStatusResponse {
@@ -149,4 +168,5 @@ export interface TaskStatusResponse {
 	status: 'pending' | 'processing' | 'completed' | 'failed';
 	estimated_time_seconds?: number;
 	result?: CoverageOptimizationResult;
+	error?: TaskError | null;
 }

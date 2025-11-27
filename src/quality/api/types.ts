@@ -90,26 +90,6 @@ export interface ClientMetadata {
 }
 
 /**
- * Severity breakdown
- */
-export interface SeverityBreakdown {
-	error: number;
-	warning: number;
-	info: number;
-}
-
-/**
- * Analysis metrics
- */
-export interface AnalysisMetrics {
-	total_tests: number;
-	issues_count: number;
-	analysis_time_ms: number;
-	rules_applied: string[];
-	severity_breakdown?: SeverityBreakdown;
-}
-
-/**
  * Analyze quality request
  */
 export interface AnalyzeQualityRequest {
@@ -120,12 +100,21 @@ export interface AnalyzeQualityRequest {
 }
 
 /**
+ * Summary of analysis results
+ */
+export interface AnalysisSummary {
+	total_files: number;
+	total_issues: number;
+	critical_issues: number;
+}
+
+/**
  * Analyze quality response
  */
 export interface AnalyzeQualityResponse {
 	analysis_id: string;
 	issues: QualityIssue[];
-	metrics: AnalysisMetrics;
+	summary: AnalysisSummary;
 	version_id?: string;
 }
 

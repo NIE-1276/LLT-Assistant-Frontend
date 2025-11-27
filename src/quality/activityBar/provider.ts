@@ -20,8 +20,10 @@ export class QualityTreeProvider implements vscode.TreeDataProvider<QualityTreeI
 	/**
 	 * Refresh the tree view with new analysis results
 	 */
-	public refresh(result: AnalyzeQualityResponse): void {
-		this.analysisResult = result;
+	public refresh(result?: AnalyzeQualityResponse): void {
+		if (result) {
+			this.analysisResult = result;
+		}
 		this._onDidChangeTreeData.fire(undefined);
 	}
 
@@ -122,24 +124,18 @@ export class QualityTreeProvider implements vscode.TreeDataProvider<QualityTreeI
 	 * Create summary item
 	 */
 	private createSummaryItem(): QualityTreeItem {
-		const metrics = this.analysisResult!.metrics;
-		const breakdown = metrics.severity_breakdown;
+		const summary = this.analysisResult!.summary;
 
 		const tooltip = new vscode.MarkdownString();
 		tooltip.appendMarkdown(`**Test Quality Overview**\n\n`);
-		tooltip.appendMarkdown(`- Total Tests: ${metrics.total_tests}\n`);
-		tooltip.appendMarkdown(`- Issues Found: ${metrics.issues_count}\n`);
-		if (breakdown) {
-			tooltip.appendMarkdown(`- Critical: ${breakdown.error}\n`);
-			tooltip.appendMarkdown(`- Warning: ${breakdown.warning}\n`);
-			tooltip.appendMarkdown(`- Info: ${breakdown.info}\n`);
-		}
-		tooltip.appendMarkdown(`- Analysis Time: ${metrics.analysis_time_ms}ms\n`);
+		tooltip.appendMarkdown(`- Total Files: ${summary.total_files}\n`);
+		tooltip.appendMarkdown(`- Issues Found: ${summary.total_issues}\n`);
+		tooltip.appendMarkdown(`- Critical Issues: ${summary.critical_issues}\n`);
 
 		return {
 			type: TreeItemType.Summary,
 			label: '📊 Test Quality Overview',
-			description: `${metrics.issues_count} ${metrics.issues_count === 1 ? 'issue' : 'issues'} found`,
+			description: `${summary.total_issues} ${summary.total_issues === 1 ? 'issue' : 'issues'} found`,
 			tooltip: tooltip,
 			collapsibleState: vscode.TreeItemCollapsibleState.None,
 			contextValue: 'summary'

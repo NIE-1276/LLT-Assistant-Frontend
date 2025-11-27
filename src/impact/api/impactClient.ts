@@ -6,12 +6,13 @@
 import * as vscode from 'vscode';
 import axios, { AxiosError, AxiosInstance } from 'axios';
 import {
-	DetectCodeChangesRequest,
-	DetectCodeChangesResponse,
+	ImpactAnalysisRequest,
+	ImpactAnalysisResponse,
 	BackendError,
 	BackendErrorType,
 	HealthCheckResponse
 } from './types';
+import { BackendConfigManager } from '../../utils/backendConfig';
 
 /**
  * Impact Analysis Backend Client
@@ -21,7 +22,7 @@ export class ImpactAnalysisClient {
 	private backendUrl: string;
 
 	constructor() {
-		this.backendUrl = this.getBackendUrl();
+		this.backendUrl = BackendConfigManager.getBackendUrl();
 		this.axiosInstance = axios.create({
 			baseURL: this.backendUrl,
 			timeout: 30000, // 30 seconds
@@ -32,19 +33,18 @@ export class ImpactAnalysisClient {
 	}
 
 	/**
-	 * Get backend URL from configuration
+	 * Get backend URL from unified configuration
+	 * @deprecated - Now uses BackendConfigManager directly in constructor
 	 */
 	private getBackendUrl(): string {
-		const config = vscode.workspace.getConfiguration('llt-assistant');
-		// Use the same backend URL as test generation
-		return config.get('backendUrl', 'https://cs5351.efan.dev');
+		return BackendConfigManager.getBackendUrl();
 	}
 
 	/**
 	 * Update backend URL when configuration changes
 	 */
 	updateBackendUrl(): void {
-		this.backendUrl = this.getBackendUrl();
+		this.backendUrl = BackendConfigManager.getBackendUrl();
 		this.axiosInstance = axios.create({
 			baseURL: this.backendUrl,
 			timeout: 30000,
@@ -83,20 +83,28 @@ export class ImpactAnalysisClient {
 	 * Detect code changes and get affected tests
 	 */
 	async detectCodeChanges(
-		request: DetectCodeChangesRequest
-	): Promise<DetectCodeChangesResponse> {
+		request: ImpactAnalysisRequest
+	): Promise<ImpactAnalysisResponse> {
 		try {
 			// Add client metadata
 			request.client_metadata = this.getClientMetadata();
 
+			// Log the full request payload
+			console.log('[Impact Analysis] Request Payload:', JSON.stringify(request, null, 2));
+
 			// Make API call
-			const response = await this.axiosInstance.post<DetectCodeChangesResponse>(
-				'/workflows/detect-code-changes',
+			const response = await this.axiosInstance.post<ImpactAnalysisResponse>(
+				'/analysis/impact',
 				request
 			);
 
+			// Log the full response object
+			console.log('[Impact Analysis] Response Object:', JSON.stringify(response.data, null, 2));
+
 			return response.data;
 		} catch (error) {
+			// Log the error object
+			console.error('[Impact Analysis] Error Object:', error);
 			throw this.handleError(error);
 		}
 	}
@@ -105,11 +113,11 @@ export class ImpactAnalysisClient {
 	 * Batch detect changes for multiple files
 	 */
 	async detectBatchChanges(
-		requests: DetectCodeChangesRequest[]
-	): Promise<DetectCodeChangesResponse[]> {
+		requests: ImpactAnalysisRequest[]
+	): Promise<ImpactAnalysisResponse[]> {
 		try {
 			// Process each request sequentially to avoid overwhelming the backend
-			const results: DetectCodeChangesResponse[] = [];
+			const results: ImpactAnalysisResponse[] = [];
 
 			for (const request of requests) {
 				const result = await this.detectCodeChanges(request);

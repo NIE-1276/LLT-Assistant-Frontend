@@ -299,6 +299,42 @@ export class GitDiffExtractor {
 	}
 
 	/**
+	 * Get git diff for specific files
+	 */
+	async getDiffForFiles(filePaths: string[]): Promise<string> {
+		try {
+			if (!this.isGitRepository() || filePaths.length === 0) {
+				return '';
+			}
+
+			// Join file paths for git diff command
+			const filesString = filePaths.join(' ');
+			const diffOutput = execSync(`git diff HEAD -- ${filesString}`, {
+				cwd: this.workspaceRoot,
+				encoding: 'utf-8'
+			});
+
+			return diffOutput;
+		} catch (error) {
+			console.error('Error getting git diff for files:', error);
+			return '';
+		}
+	}
+
+	/**
+	 * Get all test file paths in the workspace
+	 */
+	async getAllTestFilePaths(): Promise<Array<string>> {
+		try {
+			const testFiles = await vscode.workspace.findFiles('**/test_*.py', '**/node_modules/**');
+			return testFiles.map(fileUri => vscode.workspace.asRelativePath(fileUri));
+		} catch (error) {
+			console.error('Error getting test file paths:', error);
+			return [];
+		}
+	}
+
+	/**
 	 * Get all test files in the workspace
 	 */
 	async getAllTestFiles(): Promise<string> {

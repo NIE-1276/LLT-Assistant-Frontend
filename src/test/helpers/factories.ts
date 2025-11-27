@@ -8,7 +8,7 @@ import { MockTextDocument, Uri } from '../mocks/vscode';
 import type {
   AnalyzeQualityResponse,
   QualityIssue,
-  AnalysisMetrics,
+  AnalysisSummary,
   IssueSuggestion,
 } from '../../quality/api/types';
 
@@ -52,21 +52,15 @@ export function createMockSuggestion(
 }
 
 /**
- * Create mock quality metrics
+ * Create mock analysis summary
  */
-export function createMockQualityMetrics(
-  overrides: Partial<AnalysisMetrics> = {}
-): AnalysisMetrics {
+export function createMockAnalysisSummary(
+  overrides: Partial<AnalysisSummary> = {}
+): AnalysisSummary {
   return {
-    total_tests: 45,
-    issues_count: 12,
-    analysis_time_ms: 1234,
-    rules_applied: ['trivial-assertion', 'missing-assertion'],
-    severity_breakdown: {
-      error: 3,
-      warning: 6,
-      info: 3,
-    },
+    total_files: 5,
+    total_issues: 12,
+    critical_issues: 3,
     ...overrides,
   };
 }
@@ -88,7 +82,7 @@ export function createMockAnalysisResponse(
         message: 'Test lacks proper assertions',
       }),
     ],
-    metrics: createMockQualityMetrics(),
+    summary: createMockAnalysisSummary(),
     version_id: 'v1_2024-11-16_abc123',
     ...overrides,
   };

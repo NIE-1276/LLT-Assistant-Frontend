@@ -156,6 +156,21 @@ export class CoverageCommands {
 	 */
 	async showCoverageItem(filePath: string, func: UncoveredFunction | { startLine: number; endLine: number; type?: string }): Promise<void> {
 		try {
+			// Check if file exists before attempting to open it
+			if (!fs.existsSync(filePath)) {
+				const fileName = path.basename(filePath);
+				const selection = await vscode.window.showWarningMessage(
+					`File not found: ${fileName}. The coverage report may be outdated or from a different project.`,
+					'Re-analyze Coverage',
+					'Dismiss'
+				);
+
+				if (selection === 'Re-analyze Coverage') {
+					await vscode.commands.executeCommand('llt-assistant.analyzeCoverage');
+				}
+				return;
+			}
+
 			// Open file and jump to the uncovered lines
 			const document = await vscode.workspace.openTextDocument(filePath);
 			const editor = await vscode.window.showTextDocument(document);
@@ -320,7 +335,7 @@ export class CoverageCommands {
 						}
 					);
 
-					if (!finalStatus.result || !finalStatus.result.recommended_tests) {
+					if (!finalStatus.result || !finalStatus.result.recommended_tests || finalStatus.result.recommended_tests.length === 0) {
 						vscode.window.showWarningMessage('No recommended tests generated.');
 						return;
 					}
@@ -526,9 +541,12 @@ export class CoverageCommands {
 		filePath: string,
 		workspaceRoot: string
 	): Promise<UncoveredRange[]> {
+		// Extract source paths from coverage.xml
+		const sourcePaths = this.extractSourcePaths(xmlContent);
+
 		// Try multiple path formats to match the filename in coverage.xml
-		const pathVariants = this.getPathVariants(filePath, workspaceRoot);
-		
+		const pathVariants = this.getPathVariants(filePath, workspaceRoot, sourcePaths);
+
 		let match: RegExpExecArray | null = null;
 		for (const pathVariant of pathVariants) {
 			const escapedPath = pathVariant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -558,9 +576,37 @@ export class CoverageCommands {
 	}
 
 	/**
-	 * Get multiple path variants to try matching against coverage.xml
+	 * Extract source paths from coverage.xml <sources> section
+	 * Returns array of base paths used in coverage.xml for relative paths
 	 */
-	private getPathVariants(absolutePath: string, workspaceRoot?: string): string[] {
+	private extractSourcePaths(xmlContent: string): string[] {
+		const sourcePaths: string[] = [];
+
+		// Match <sources> section
+		const sourcesMatch = /<sources>([\s\S]*?)<\/sources>/g.exec(xmlContent);
+		if (sourcesMatch) {
+			const sourcesContent = sourcesMatch[1];
+
+			// Match all <source> tags
+			const sourceRegex = /<source>([^<]+)<\/source>/g;
+			let match;
+			while ((match = sourceRegex.exec(sourcesContent)) !== null) {
+				const sourcePath = match[1].trim();
+				if (sourcePath) {
+					sourcePaths.push(sourcePath);
+					console.log(`[LLT Coverage] Found source path in coverage.xml: ${sourcePath}`);
+				}
+			}
+		}
+
+		return sourcePaths;
+	}
+
+	/**
+	 * Get multiple path variants to try matching against coverage.xml
+	 * Includes paths relative to workspace root AND relative to coverage.xml source paths
+	 */
+	private getPathVariants(absolutePath: string, workspaceRoot?: string, sourcePaths: string[] = []): string[] {
 		const variants: string[] = [absolutePath];
 
 		if (workspaceRoot) {
@@ -583,6 +629,23 @@ export class CoverageCommands {
 
 			// Try just the filename
 			variants.push(path.basename(absolutePath));
+		}
+
+		// IMPORTANT: Try relative paths from coverage.xml <source> paths
+		// This handles cases where coverage.xml has <source>/path/to/app</source>
+		// and filenames are relative to that source path
+		for (const sourcePath of sourcePaths) {
+			try {
+				const relativeToSource = path.relative(sourcePath, absolutePath);
+				if (relativeToSource && !relativeToSource.startsWith('..')) {
+					// Add both platform-specific and forward-slash versions
+					variants.push(relativeToSource);
+					variants.push(relativeToSource.replace(/\\/g, '/'));
+					console.log(`[LLT Coverage] Added path variant relative to source: ${relativeToSource}`);
+				}
+			} catch {
+				// Ignore errors in path calculation
+			}
 		}
 
 		return variants;
